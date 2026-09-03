@@ -1,0 +1,44 @@
+package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+
+	"github.com/core-daemon/core-daemon/internal/ai"
+	"github.com/core-daemon/core-daemon/internal/api"
+	"github.com/core-daemon/core-daemon/internal/storage"
+	"github.com/core-daemon/core-daemon/internal/web"
+)
+
+func main() {
+	if err := os.MkdirAll("tasks", 0o755); err != nil {
+		log.Fatalf("create tasks: %v", err)
+	}
+
+	notes, err := storage.Open("notes")
+	if err != nil {
+		log.Fatalf("notes: %v", err)
+	}
+	defer notes.Close()
+
+	ollamaURL := envOr("OLLAMA_URL", "http://localhost:11434")
+	ollamaModel := envOr("OLLAMA_MODEL", "qwen2.5:7b")
+	llm := ai.New(ollamaURL, ollamaModel)
+	agent := ai.NewAgent(llm, notes)
+
+	mux := http.NewServeMux()
+	api.MountNotes(mux, notes)
+	api.MountChat(mux, agent)
+	mux.Handle("/", http.FileServer(http.FS(web.Files)))
+
+	log.Printf("listening on :8080 (ollama %s, model %s)", ollamaURL, ollamaModel)
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

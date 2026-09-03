@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Core Daemon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <button type="button" class="sidebar__action sidebar__add">
+        <span class="sidebar__icon">+</span>
+        Новая заметка
+      </button>
+      <div class="sidebar__section">
+        <div class="sidebar__label">Заметки</div>
+        <ul class="sidebar__list"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="chat">
+        <div class="chat__messages"></div>
+        <form class="chat__input">
+          <textarea name="message" rows="1" placeholder="Сообщение…"></textarea>
+          <button type="submit" aria-label="Отправить">↑</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="note-modal">
+    <div class="note-modal__head">
+      <h2 class="note-modal__title"></h2>
+      <button type="button" class="note-modal__close" aria-label="Закрыть">×</button>
+    </div>
+    <div class="note-modal__body"></div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

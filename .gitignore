@@ -1,0 +1,23 @@
+# Binaries
+/daemon
+/daemon.exe
+*.exe
+
+# User data
+/notes/*
+!/notes/.gitkeep
+/tasks/*
+!/tasks/.gitkeep
+
+# Go
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
