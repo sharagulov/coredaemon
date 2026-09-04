@@ -12,10 +12,6 @@ import (
 )
 
 func main() {
-	if err := os.MkdirAll("tasks", 0o755); err != nil {
-		log.Fatalf("create tasks: %v", err)
-	}
-
 	notes, err := storage.Open("notes")
 	if err != nil {
 		log.Fatalf("notes: %v", err)

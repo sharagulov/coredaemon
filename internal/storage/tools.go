@@ -15,6 +15,9 @@ var (
 	multiHyphen          = regexp.MustCompile(`-{2,}`)
 )
 
+// BlockedMutationMsg is returned when the model tries to delete or move notes.
+const BlockedMutationMsg = "нельзя удалять или перемещать заметки в целях безопасности"
+
 // ToolResult is returned to the model after a tool call.
 type ToolResult struct {
 	Status  string      `json:"status"`
@@ -123,30 +126,8 @@ func (n *Notes) RunTool(toolName string, args json.RawMessage) (ToolResult, erro
 		}
 		return ToolResult{Status: "success", Hits: hits, Found: len(hits)}, nil
 
-	case "trash_note":
-		var p struct {
-			Filename string `json:"filename"`
-		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{Status: "error", Error: "invalid arguments"}, nil
-		}
-		name := normalizeFilename(p.Filename)
-		note, err := n.Get(name)
-		if errors.Is(err, ErrNotFound) {
-			return ToolResult{Status: "error", Error: "note not found"}, nil
-		}
-		if err != nil {
-			return ToolResult{Status: "error", Error: err.Error()}, nil
-		}
-		rel, err := n.Trash(name)
-		if err != nil {
-			return ToolResult{Status: "error", Error: err.Error()}, nil
-		}
-		return ToolResult{
-			Status: "success",
-			File:   rel,
-			Title:  displayTitle(rel, note.Content),
-		}, nil
+	case "trash_note", "delete_note", "remove_note", "move_note":
+		return ToolResult{Status: "error", Error: BlockedMutationMsg}, nil
 
 	default:
 		return ToolResult{Status: "error", Error: "unknown tool"}, nil
@@ -166,8 +147,11 @@ func (n *Notes) uniqueName(slug string) (string, error) {
 		if err := validateName(candidate); err != nil {
 			return "", err
 		}
-		if _, err := os.Stat(filepath.Join(n.dir, candidate)); os.IsNotExist(err) {
-			return candidate, nil
+		if _, err := os.Stat(filepath.Join(n.dir, candidate)); err != nil {
+			if os.IsNotExist(err) {
+				return candidate, nil
+			}
+			return "", fmt.Errorf("stat note: %w", err)
 		}
 	}
 	return "", fmt.Errorf("could not allocate unique note name")

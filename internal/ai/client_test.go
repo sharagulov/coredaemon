@@ -77,7 +77,7 @@ func TestAgent_toolLoop(t *testing.T) {
 	}
 }
 
-func TestAgent_trashNote(t *testing.T) {
+func TestAgent_blocksTrashNote(t *testing.T) {
 	step := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -86,7 +86,7 @@ func TestAgent_trashNote(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"trash_note","arguments":{"filename":"old.md"}}}]}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Заметка в корзине"}}`))
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"У меня нет возможности удалять заметки в целях безопасности"}}`))
 	}))
 	defer srv.Close()
 
@@ -106,10 +106,10 @@ func TestAgent_trashNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.NotesChanged || len(result.Trashed) != 1 || result.Trashed[0] != "old.md" {
+	if result.NotesChanged {
 		t.Fatalf("result = %+v", result)
 	}
-	if _, err := notes.Get("old.md"); err != storage.ErrNotFound {
-		t.Fatalf("Get after trash: %v", err)
+	if _, err := notes.Get("old.md"); err != nil {
+		t.Fatalf("note should remain: %v", err)
 	}
 }

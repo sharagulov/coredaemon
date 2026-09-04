@@ -78,23 +78,6 @@ func NoteTools() []Tool {
 		{
 			Type: "function",
 			Function: ToolFunction{
-				Name:        "trash_note",
-				Description: "Move a note to the trash. The file is not permanently deleted and can be restored from notes/.trash.",
-				Parameters: map[string]any{
-					"type":     "object",
-					"required": []string{"filename"},
-					"properties": map[string]any{
-						"filename": map[string]any{
-							"type":        "string",
-							"description": "Note path, e.g. tasks.md or automotive-brand/REUS.md",
-						},
-					},
-				},
-			},
-		},
-		{
-			Type: "function",
-			Function: ToolFunction{
 				Name:        "search_notes",
 				Description: "Search all notes by keywords. Use before answering questions about existing notes.",
 				Parameters: map[string]any{

@@ -2,7 +2,7 @@ package ai
 
 // Phase is a live update from the agent loop.
 type Phase struct {
-	Kind  string `json:"kind"` // thinking | created | updated | trashed
+	Kind  string `json:"kind"` // thinking | created | updated
 	File  string `json:"file,omitempty"`
 	Title string `json:"title,omitempty"`
 }

@@ -1,10 +1,12 @@
 package storage
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNotes_CreateAppendReadTool(t *testing.T) {
@@ -74,17 +76,32 @@ func TestNotes_Trash(t *testing.T) {
 		t.Fatalf("search after trash = %+v, err = %v", hits, err)
 	}
 
-	trashed := filepath.Join(n.dir, trashDirName, filepath.FromSlash(name))
-	data, err := os.ReadFile(trashed)
-	if err != nil || !strings.Contains(string(data), "brand") {
-		t.Fatalf("trash file = %q, err = %v", data, err)
+	items, err := n.ListTrash()
+	if err != nil || len(items) != 1 || items[0].Name != name || items[0].Title != "Identity" {
+		t.Fatalf("trash list = %+v, err = %v", items, err)
+	}
+	if items[0].DaysLeft < 29 || items[0].DaysLeft > 30 {
+		t.Fatalf("days_left = %d", items[0].DaysLeft)
 	}
 	if _, err := os.Stat(filepath.Join(n.dir, "automotive-brand")); !os.IsNotExist(err) {
 		t.Fatalf("expected empty folders pruned, err = %v", err)
 	}
+
+	restored, err := n.Restore(items[0].ID)
+	if err != nil || restored.Name != name || !strings.Contains(restored.Content, "brand") {
+		t.Fatalf("restore = %+v, err = %v", restored, err)
+	}
+	got, err := n.Get(name)
+	if err != nil || !strings.Contains(got.Content, "brand") {
+		t.Fatalf("get restored = %+v, err = %v", got, err)
+	}
+	empty, err := n.ListTrash()
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("trash after restore = %+v, err = %v", empty, err)
+	}
 }
 
-func TestNotes_Trash_collision(t *testing.T) {
+func TestNotes_Trash_restoreCollision(t *testing.T) {
 	n := openTest(t)
 	if _, err := n.Save("tasks.md", "v1"); err != nil {
 		t.Fatal(err)
@@ -95,34 +112,86 @@ func TestNotes_Trash_collision(t *testing.T) {
 	if _, err := n.Save("tasks.md", "v2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := n.Trash("tasks.md"); err != nil {
-		t.Fatal(err)
-	}
 
-	first, err := os.ReadFile(filepath.Join(n.dir, trashDirName, "tasks.md"))
-	if err != nil || string(first) != "v1" {
-		t.Fatalf("first = %q, err = %v", first, err)
+	items, err := n.ListTrash()
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items = %+v, err = %v", items, err)
 	}
-	second, err := os.ReadFile(filepath.Join(n.dir, trashDirName, "tasks-2.md"))
-	if err != nil || string(second) != "v2" {
-		t.Fatalf("second = %q, err = %v", second, err)
+	restored, err := n.Restore(items[0].ID)
+	if err != nil || restored.Name != "tasks-2.md" || restored.Content != "v1" {
+		t.Fatalf("restore = %+v, err = %v", restored, err)
 	}
 }
 
-func TestNotes_RunTool_trashNote(t *testing.T) {
+func TestNotes_Trash_migratesLegacy(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, trashDirName, "folder", "old.md")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("# Old\nhello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = n.Close() })
+
+	items, err := n.ListTrash()
+	if err != nil || len(items) != 1 || items[0].Name != "folder/old.md" || items[0].Title != "Old" {
+		t.Fatalf("items = %+v, err = %v", items, err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy file still present: %v", err)
+	}
+}
+
+func TestNotes_Trash_expiresAfter30Days(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("old.md", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Trash("old.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := n.ListTrash()
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items = %+v, err = %v", items, err)
+	}
+
+	meta := trashMeta{Name: "old.md", TrashedAt: time.Now().UTC().Add(-31 * 24 * time.Hour)}
+	body, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(n.dir, trashDirName, items[0].ID, trashMetaFile), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gone, err := n.ListTrash()
+	if err != nil || len(gone) != 0 {
+		t.Fatalf("expired trash = %+v, err = %v", gone, err)
+	}
+	if _, err := n.Restore(items[0].ID); err != ErrNotFound {
+		t.Fatalf("restore expired: %v", err)
+	}
+}
+
+func TestNotes_RunTool_trashNoteBlocked(t *testing.T) {
 	n := openTest(t)
 	if _, err := n.Save("gone.md", "# Gone\n"); err != nil {
 		t.Fatal(err)
 	}
 
 	res, err := n.RunTool("trash_note", []byte(`{"filename":"gone.md"}`))
-	if err != nil || res.Status != "success" || res.File != "gone.md" || res.Title != "Gone" {
+	if err != nil || res.Status != "error" || res.Error != BlockedMutationMsg {
 		t.Fatalf("res = %+v, err = %v", res, err)
 	}
-
-	missing, err := n.RunTool("trash_note", []byte(`{"filename":"gone.md"}`))
-	if err != nil || missing.Status != "error" {
-		t.Fatalf("missing = %+v, err = %v", missing, err)
+	if _, err := n.Get("gone.md"); err != nil {
+		t.Fatalf("note should remain: %v", err)
 	}
 }
 

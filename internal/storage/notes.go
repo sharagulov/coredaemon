@@ -57,6 +57,14 @@ func Open(dir string) (*Notes, error) {
 	if err := n.openIndex(); err != nil {
 		return nil, err
 	}
+	if err := n.migrateLegacyTrash(); err != nil {
+		_ = n.Close()
+		return nil, err
+	}
+	if err := n.purgeExpiredTrash(); err != nil {
+		_ = n.Close()
+		return nil, err
+	}
 	return n, nil
 }
 

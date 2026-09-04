@@ -66,6 +66,104 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body[data-screen="home"] .app,
+body[data-screen="notes"] .home {
+  display: none;
+}
+
+/* Home */
+
+.home {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.home__grid {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.home__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  width: 220px;
+  height: 200px;
+  margin: 0;
+  padding: 1.5rem 1.25rem 1.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--motion-fast), border-color var(--motion-fast), transform var(--motion-fast);
+}
+
+.home__card:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: #404040;
+  transform: translateY(-2px);
+}
+
+.home__card:focus-visible {
+  outline: 2px solid #737373;
+  outline-offset: 3px;
+}
+
+.home__card:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.home__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.home__card:hover:not(:disabled) .home__icon {
+  color: var(--text);
+}
+
+.home__card:disabled .home__icon {
+  color: var(--text-muted);
+}
+
+.home__icon svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.home__title {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.home__hint {
+  position: absolute;
+  bottom: 1.15rem;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .app {
   display: flex;
   height: 100vh;
@@ -104,9 +202,57 @@ body {
   color: var(--text);
 }
 
-.sidebar__action:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.sidebar__action.is-active {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.sidebar__icon--home,
+.sidebar__icon--trash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar__icon--home svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.sidebar__icon--trash svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.sidebar__trash-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sidebar__restore {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sidebar__restore:hover {
+  color: var(--text);
+  border-color: #404040;
+}
+
+.sidebar__file--trash {
+  gap: 0.5rem;
 }
 
 .sidebar__icon {
@@ -635,11 +781,55 @@ body {
   font-style: italic;
 }
 
+.note-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.note-modal__action {
+  margin: 0;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.note-modal__action:hover {
+  color: var(--text);
+  border-color: #404040;
+}
+
+.note-modal__action--danger:hover {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+@media (max-width: 560px) {
+  .home__grid {
+    flex-direction: column;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .message--enter,
   .message__facts--enter,
   .typing-indicator span {
     animation: none;
+  }
+
+  .home__card {
+    transition: none;
+  }
+
+  .home__card:hover:not(:disabled) {
+    transform: none;
   }
 
   .sidebar__glyph--chevron {

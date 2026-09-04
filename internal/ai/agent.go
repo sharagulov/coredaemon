@@ -22,7 +22,13 @@ var allowedTools = map[string]bool{
 	"append_to_note": true,
 	"read_note":      true,
 	"search_notes":   true,
-	"trash_note":     true,
+}
+
+var blockedTools = map[string]bool{
+	"trash_note":  true,
+	"delete_note": true,
+	"remove_note": true,
+	"move_note":   true,
 }
 
 // Agent runs the tool-calling loop against Ollama and storage.
@@ -42,7 +48,6 @@ type ChatResult struct {
 	NotesChanged bool                `json:"notes_changed"`
 	Created      []string            `json:"created,omitempty"`
 	Updated      []string            `json:"updated,omitempty"`
-	Trashed      []string            `json:"trashed,omitempty"`
 	Searched     bool                `json:"searched,omitempty"`
 	Matches      []storage.SearchHit `json:"matches,omitempty"`
 }
@@ -54,7 +59,7 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 	notesChanged := false
 	nudged := false
 	searched := false
-	var createdFiles, updatedFiles, trashedFiles []string
+	var createdFiles, updatedFiles []string
 	var matches []storage.SearchHit
 
 	for turn := 0; turn < maxToolTurns; turn++ {
@@ -80,7 +85,6 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				NotesChanged: notesChanged,
 				Created:      createdFiles,
 				Updated:      updatedFiles,
-				Trashed:      trashedFiles,
 				Searched:     searched,
 				Matches:      matches,
 			}, nil
@@ -94,6 +98,13 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				continue
 			}
 			name := call.Function.Name
+			if blockedTools[name] {
+				messages = append(messages, toolMessage(name, storage.ToolResult{
+					Status: "error",
+					Error:  storage.BlockedMutationMsg,
+				}))
+				continue
+			}
 			if !allowedTools[name] {
 				messages = append(messages, toolMessage(name, storage.ToolResult{
 					Status: "error",
@@ -124,10 +135,6 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 					notesChanged = true
 					updatedFiles = append(updatedFiles, result.File)
 					emitProgress(progress, Phase{Kind: "updated", File: result.File, Title: result.Title})
-				case "trash_note":
-					notesChanged = true
-					trashedFiles = append(trashedFiles, result.File)
-					emitProgress(progress, Phase{Kind: "trashed", File: result.File, Title: result.Title})
 				}
 			}
 			messages = append(messages, toolMessage(name, result))

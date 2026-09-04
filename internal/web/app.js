@@ -3,7 +3,10 @@
 
   const state = {
     notes: [],
+    trash: [],
+    view: "notes",
     active: null,
+    activeTrash: null,
     chat: [],
     sending: false,
     pending: false,
@@ -12,7 +15,11 @@
 
   const els = {
     list: document.querySelector(".sidebar__list"),
+    label: document.querySelector(".sidebar__label"),
+    homeBtn: document.querySelector(".sidebar__home"),
+    notesCard: document.querySelector("[data-open=\"notes\"]"),
     addBtn: document.querySelector(".sidebar__add"),
+    trashBtn: document.querySelector(".sidebar__trash"),
     messages: document.querySelector(".chat__messages"),
     chatForm: document.querySelector(".chat__input"),
     chatInput: document.querySelector(".chat__input textarea"),
@@ -21,6 +28,7 @@
     modalTitle: document.querySelector(".note-modal__title"),
     modalBody: document.querySelector(".note-modal__body"),
     modalClose: document.querySelector(".note-modal__close"),
+    modalAction: document.querySelector(".note-modal__action"),
   };
 
   function noteLabel(name) {
@@ -42,7 +50,7 @@
   function toggleFolder(path) {
     if (state.openFolders.has(path)) state.openFolders.delete(path);
     else state.openFolders.add(path);
-    renderNotes();
+    renderList();
   }
 
   function compareNames(a, b) {
@@ -161,7 +169,7 @@
     if (!file || state.notes.some((n) => n.name === file)) return;
     state.notes.push({ name: file, title: title || noteLabel(file), preview: "" });
     revealFolders(file);
-    renderNotes();
+    renderList();
   }
 
   function removeNote(file) {
@@ -171,7 +179,42 @@
       state.active = null;
       if (els.modal.open) closeNoteModal();
     }
-    renderNotes();
+    renderList();
+  }
+
+  function daysLeftLabel(days) {
+    if (days <= 0) return "сегодня";
+    return `ещё ${days} дн.`;
+  }
+
+  function setView(view) {
+    state.view = view;
+    els.label.textContent = view === "trash" ? "Корзина" : "Заметки";
+    els.trashBtn.classList.toggle("is-active", view === "trash");
+  }
+
+  function applyScreen(screen) {
+    document.body.dataset.screen = screen;
+    if (screen === "home") {
+      if (els.modal.open) closeNoteModal();
+      return;
+    }
+    setView("notes");
+    loadNotes().catch(showError);
+  }
+
+  function goHome() {
+    if (location.hash === "#notes") {
+      history.pushState(null, "", location.pathname + location.search);
+    }
+    applyScreen("home");
+  }
+
+  function goNotes() {
+    if (location.hash !== "#notes") {
+      history.pushState(null, "", "#notes");
+    }
+    applyScreen("notes");
   }
 
   async function api(path, options) {
@@ -195,9 +238,16 @@
     return res.json();
   }
 
-  function renderNotes() {
+  function renderList() {
     els.list.innerHTML = "";
+    if (state.view === "trash") {
+      renderTrash();
+      return;
+    }
+    renderNotes();
+  }
 
+  function renderNotes() {
     if (state.notes.length === 0) {
       const empty = document.createElement("li");
       empty.className = "sidebar__empty";
@@ -207,6 +257,39 @@
     }
 
     renderNoteTree(els.list, buildNoteTree(state.notes), "", 0);
+  }
+
+  function renderTrash() {
+    if (state.trash.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "sidebar__empty";
+      empty.textContent = "Корзина пуста";
+      els.list.appendChild(empty);
+      return;
+    }
+
+    for (const item of state.trash) {
+      const row = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sidebar__row sidebar__file sidebar__file--trash";
+      btn.title = item.name;
+      if (state.activeTrash?.id === item.id) btn.classList.add("is-active");
+      btn.appendChild(glyph("file"));
+
+      const label = document.createElement("span");
+      label.className = "sidebar__row-label";
+      label.textContent = item.title || noteLabel(item.name);
+      btn.appendChild(label);
+
+      const meta = document.createElement("span");
+      meta.className = "sidebar__trash-meta";
+      meta.textContent = daysLeftLabel(item.days_left);
+      btn.appendChild(meta);
+      btn.addEventListener("click", () => selectTrashItem(item.id));
+      row.appendChild(btn);
+      els.list.appendChild(row);
+    }
   }
 
   function renderNoteTree(parent, node, prefix, depth) {
@@ -299,7 +382,7 @@
 
     const label = document.createElement("div");
     label.className = `facts__label facts__label--${kind}`;
-    const labels = { created: "Создано", updated: "Обновлено", trashed: "В корзине" };
+    const labels = { created: "Создано", updated: "Обновлено" };
     label.textContent = `${labels[kind] || kind} · ${files.length}`;
     group.appendChild(label);
 
@@ -357,7 +440,7 @@
     renderMarkdown(content, msg.content || "");
     wrap.appendChild(content);
 
-    if (msg.created?.length || msg.updated?.length || msg.trashed?.length || msg.searched) {
+    if (msg.created?.length || msg.updated?.length || msg.searched) {
       const facts = document.createElement("div");
       facts.className = "message__facts message__facts--enter";
 
@@ -373,8 +456,6 @@
       if (created) facts.appendChild(created);
       const updated = createFactsGroup("updated", msg.updated);
       if (updated) facts.appendChild(updated);
-      const trashed = createFactsGroup("trashed", msg.trashed);
-      if (trashed) facts.appendChild(trashed);
 
       wrap.appendChild(facts);
     }
@@ -438,19 +519,39 @@
     els.list.classList.add("is-loading");
     try {
       state.notes = await api("/api/notes");
-      renderNotes();
+      if (state.view === "notes") renderList();
     } finally {
       els.list.classList.remove("is-loading");
     }
   }
 
+  async function loadTrash() {
+    els.list.classList.add("is-loading");
+    try {
+      state.trash = await api("/api/trash");
+      if (state.view === "trash") renderList();
+    } finally {
+      els.list.classList.remove("is-loading");
+    }
+  }
+
+  function fillModal(title, content, actionLabel, danger) {
+    els.modalTitle.textContent = title;
+    const empty = !content || !String(content).trim();
+    els.modalBody.textContent = empty ? "Пустая заметка" : content;
+    els.modalBody.classList.toggle("note-modal__body--empty", empty);
+    els.modalAction.textContent = actionLabel;
+    els.modalAction.classList.toggle("note-modal__action--danger", !!danger);
+    els.modal.showModal();
+  }
+
   function openNoteModal(note) {
     const summary = state.notes.find((n) => n.name === note.name);
-    els.modalTitle.textContent = summary?.title || note.name;
-    const empty = !note.content || !note.content.trim();
-    els.modalBody.textContent = empty ? "Пустая заметка" : note.content;
-    els.modalBody.classList.toggle("note-modal__body--empty", empty);
-    els.modal.showModal();
+    fillModal(summary?.title || note.name, note.content, "В корзину", true);
+  }
+
+  function openTrashModal(item) {
+    fillModal(item.title || noteLabel(item.name), item.content, "Восстановить", false);
   }
 
   function closeNoteModal() {
@@ -461,8 +562,85 @@
     try {
       revealFolders(name);
       state.active = await api(`/api/notes/${encodeURIComponent(name)}`);
-      renderNotes();
+      state.activeTrash = null;
+      renderList();
       openNoteModal(state.active);
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function selectTrashItem(id) {
+    try {
+      state.activeTrash = await api(`/api/trash/${encodeURIComponent(id)}`);
+      state.active = null;
+      renderList();
+      openTrashModal(state.activeTrash);
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function trashActiveNote() {
+    const name = state.active?.name;
+    if (!name) return;
+    els.modalAction.disabled = true;
+    try {
+      await api("/api/trash", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      closeNoteModal();
+      removeNote(name);
+      if (state.view === "trash") await loadTrash();
+    } catch (err) {
+      showError(err);
+    } finally {
+      els.modalAction.disabled = false;
+    }
+  }
+
+  async function restoreActiveTrash() {
+    const id = state.activeTrash?.id;
+    if (!id) return;
+    els.modalAction.disabled = true;
+    try {
+      const note = await api(`/api/trash/${encodeURIComponent(id)}/restore`, {
+        method: "POST",
+      });
+      closeNoteModal();
+      state.activeTrash = null;
+      state.trash = state.trash.filter((item) => item.id !== id);
+      if (state.view === "trash") renderList();
+      await loadNotes();
+      if (note?.name) {
+        revealFolders(note.name);
+        state.active = note;
+      }
+    } catch (err) {
+      showError(err);
+    } finally {
+      els.modalAction.disabled = false;
+    }
+  }
+
+  async function showTrashView() {
+    setView("trash");
+    state.active = null;
+    renderList();
+    try {
+      await loadTrash();
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function showNotesView() {
+    setView("notes");
+    state.activeTrash = null;
+    renderList();
+    try {
+      await loadNotes();
     } catch (err) {
       showError(err);
     }
@@ -486,9 +664,10 @@
         method: "POST",
         body: JSON.stringify({ name, content: "" }),
       });
+      setView("notes");
       await loadNotes();
       state.active = { name, content: "" };
-      renderNotes();
+      renderList();
     } catch (err) {
       showError(err);
     } finally {
@@ -516,9 +695,6 @@
         if ((phase.kind === "created" || phase.kind === "updated") && phase.file) {
           upsertNote(phase.file, phase.title);
         }
-        if (phase.kind === "trashed" && phase.file) {
-          removeNote(phase.file);
-        }
       });
 
       state.chat.push({
@@ -526,7 +702,6 @@
         content: res.content,
         created: res.created || [],
         updated: res.updated || [],
-        trashed: res.trashed || [],
         searched: !!res.searched,
         matches: res.matches || [],
       });
@@ -546,7 +721,21 @@
     }
   }
 
+  els.notesCard.addEventListener("click", goNotes);
+  els.homeBtn.addEventListener("click", goHome);
+  window.addEventListener("popstate", () => {
+    applyScreen(location.hash === "#notes" ? "notes" : "home");
+  });
+
   els.addBtn.addEventListener("click", () => createNote());
+  els.trashBtn.addEventListener("click", () => {
+    if (state.view === "trash") showNotesView();
+    else showTrashView();
+  });
+  els.modalAction.addEventListener("click", () => {
+    if (state.activeTrash) restoreActiveTrash();
+    else trashActiveNote();
+  });
 
   els.chatForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -566,13 +755,12 @@
   els.modalClose.addEventListener("click", closeNoteModal);
 
   function showError(err) {
-    els.list.innerHTML = "";
     const item = document.createElement("li");
     item.className = "sidebar__empty sidebar__empty--error";
     item.textContent = err.message;
-    els.list.appendChild(item);
+    els.list.prepend(item);
   }
 
   renderChat();
-  loadNotes().catch(showError);
+  if (location.hash === "#notes") applyScreen("notes");
 })();
