@@ -87,7 +87,8 @@ func (n *Notes) rebuildIndex() error {
 		if len(data) > MaxNoteSize {
 			return nil
 		}
-		if _, err := ins.Exec(rel, string(data)); err != nil {
+		body := noteBody(string(data))
+		if _, err := ins.Exec(rel, body); err != nil {
 			return fmt.Errorf("index note %q: %w", rel, err)
 		}
 		return nil

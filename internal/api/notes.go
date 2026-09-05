@@ -48,8 +48,10 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 		defer r.Body.Close()
 
 		var req struct {
-			Name    string `json:"name"`
-			Content string `json:"content"`
+			Name      string `json:"name"`
+			Content   string `json:"content"`
+			Section   string `json:"section"`
+			Important *bool  `json:"important"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -66,7 +68,25 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 			return
 		}
 
-		note, err := notes.Save(req.Name, req.Content)
+		var patch *storage.NoteMetaInput
+		if req.Section != "" || req.Important != nil {
+			patch = &storage.NoteMetaInput{}
+			if req.Section != "" {
+				s := strings.TrimSpace(req.Section)
+				patch.Section = &s
+			}
+			if req.Important != nil {
+				patch.Important = req.Important
+			}
+		}
+
+		var note *storage.Note
+		var err error
+		if patch != nil {
+			note, err = notes.SaveWithMeta(req.Name, req.Content, patch)
+		} else {
+			note, err = notes.Save(req.Name, req.Content)
+		}
 		if errors.Is(err, storage.ErrInvalidName) {
 			writeErr(w, http.StatusBadRequest, "invalid note name")
 			return
@@ -75,11 +95,103 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 			writeErr(w, http.StatusBadRequest, "content too large")
 			return
 		}
+		if errors.Is(err, storage.ErrSectionInvalid) || errors.Is(err, storage.ErrSectionNotFound) {
+			writeErr(w, http.StatusBadRequest, "invalid section")
+			return
+		}
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "failed to save note")
 			return
 		}
 		writeJSON(w, http.StatusCreated, note)
+	})
+
+	mux.HandleFunc("PATCH /api/notes/{name...}", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		defer r.Body.Close()
+
+		var req struct {
+			Section   *string `json:"section"`
+			Important *bool   `json:"important"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if errors.Is(err, io.EOF) {
+				writeErr(w, http.StatusBadRequest, "request body required")
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if req.Section == nil && req.Important == nil {
+			writeErr(w, http.StatusBadRequest, "nothing to update")
+			return
+		}
+
+		note, err := notes.UpdateMeta(r.PathValue("name"), storage.NoteMetaInput{
+			Section:   req.Section,
+			Important: req.Important,
+		})
+		if errors.Is(err, storage.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "note not found")
+			return
+		}
+		if errors.Is(err, storage.ErrInvalidName) {
+			writeErr(w, http.StatusBadRequest, "invalid note name")
+			return
+		}
+		if errors.Is(err, storage.ErrSectionInvalid) || errors.Is(err, storage.ErrSectionNotFound) {
+			writeErr(w, http.StatusBadRequest, "invalid section")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to update note")
+			return
+		}
+		writeJSON(w, http.StatusOK, note)
+	})
+
+	mux.HandleFunc("GET /api/sections", func(w http.ResponseWriter, r *http.Request) {
+		list, err := notes.ListSections()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to list sections")
+			return
+		}
+		if list == nil {
+			list = []storage.Section{}
+		}
+		writeJSON(w, http.StatusOK, list)
+	})
+
+	mux.HandleFunc("POST /api/sections", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		defer r.Body.Close()
+
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if errors.Is(err, io.EOF) {
+				writeErr(w, http.StatusBadRequest, "request body required")
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		sec, err := notes.CreateSection(strings.TrimSpace(req.Name))
+		if errors.Is(err, storage.ErrSectionInvalid) {
+			writeErr(w, http.StatusBadRequest, "invalid section name")
+			return
+		}
+		if errors.Is(err, storage.ErrSectionExists) {
+			writeErr(w, http.StatusConflict, "section already exists")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to create section")
+			return
+		}
+		writeJSON(w, http.StatusCreated, sec)
 	})
 
 	mux.HandleFunc("GET /api/trash", func(w http.ResponseWriter, r *http.Request) {
