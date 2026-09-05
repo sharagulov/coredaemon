@@ -1,7 +1,18 @@
-(() => {
-  "use strict";
+import {
+  createMenuOption,
+  syncMenuOptions,
+  createDropdown,
+  createAddMenuButton,
+  bindSearchInput,
+  createInlineForm,
+  createNoteCard as createNoteCardComponent,
+  createContextMenu,
+  createSubmenuRow,
+  createContextAction,
+  registerPopupDismiss,
+} from "./ui/index.js";
 
-  const FILTER_STORAGE_KEY = "notes-filter";
+const FILTER_STORAGE_KEY = "notes-filter";
 
   const state = {
     notes: [],
@@ -9,14 +20,16 @@
     sections: [],
     view: "notes",
     sortBy: "modified",
-    filterBy: localStorage.getItem("notes-filter") || "all",
+    filterBy: localStorage.getItem(FILTER_STORAGE_KEY) || "all",
     filterCreating: false,
+    searchQuery: "",
+    searchHits: null,
+    searchSnippets: {},
     active: null,
     activeTrash: null,
     chat: [],
     sending: false,
     pending: false,
-    openFolders: new Set(),
   };
 
   const els = {
@@ -25,6 +38,7 @@
     toolbarTitle: document.querySelector(".notes-toolbar__title"),
     homeBtn: document.querySelector(".notes-toolbar__home"),
     addBtn: document.querySelector(".notes-toolbar__add"),
+    searchInput: document.querySelector(".notes-toolbar__search"),
     trashBtn: document.querySelector(".notes-toolbar__trash"),
     sortBtn: document.querySelector(".notes-toolbar__sort"),
     sortLabel: document.querySelector(".notes-toolbar__sort-label"),
@@ -38,7 +52,10 @@
     readerTitle: document.querySelector(".notes-reader__title"),
     readerMeta: document.querySelector(".notes-reader__meta"),
     readerBody: document.querySelector(".notes-reader__body"),
+    readerFoot: document.querySelector(".notes-reader__foot"),
     readerAction: document.querySelector(".notes-reader__action"),
+    ctxRoot: document.querySelector(".notes-ctx"),
+    ctxMenu: document.querySelector(".notes-ctx__menu"),
     // Legacy (mummified — preserved for future Cloud section)
     list: document.querySelector(".sidebar__list"),
     label: document.querySelector(".sidebar__label"),
@@ -46,11 +63,6 @@
     chatForm: document.querySelector(".chat__input"),
     chatInput: document.querySelector(".chat__input textarea"),
     chatSubmit: document.querySelector(".chat__input button"),
-    modal: document.querySelector(".note-modal"),
-    modalTitle: document.querySelector(".note-modal__title"),
-    modalBody: document.querySelector(".note-modal__body"),
-    modalClose: document.querySelector(".note-modal__close"),
-    modalAction: document.querySelector(".note-modal__action"),
   };
 
   function noteLabel(name) {
@@ -89,6 +101,46 @@
     { id: "all", label: "Все" },
     { id: "important", label: "Важные" },
   ];
+
+  function sectionMoveTargets() {
+    return [
+      { id: "important", label: "Важные" },
+      ...state.sections.map((s) => ({ id: s.id, label: s.name })),
+    ];
+  }
+
+  function noteMatchesSection(note, sectionId) {
+    return sectionId === "important" ? !!note?.important : note?.section === sectionId;
+  }
+
+  function appendFilterOption(menu, { id, label }) {
+    menu.appendChild(createMenuOption({
+      className: "notes-filter__option",
+      id,
+      label,
+      active: state.filterBy === id,
+      dataKey: "filter",
+    }));
+  }
+
+  let sortDropdown;
+  let filterDropdown;
+  let contextMenu;
+  let searchControl;
+
+  function closeSortMenu() {
+    sortDropdown?.close();
+  }
+
+  function closeContextMenu() {
+    contextMenu?.close();
+  }
+
+  function dismissOtherPopups(except) {
+    if (except !== "sort") closeSortMenu();
+    if (except !== "filter") closeFilterMenu();
+    if (except !== "ctx") closeContextMenu();
+  }
 
   function parseNoteDate(iso) {
     if (!iso) return null;
@@ -177,34 +229,8 @@
     const opt = SORT_OPTIONS.find((o) => o.id === state.sortBy) || SORT_OPTIONS[0];
     els.sortLabel.textContent = opt.label;
     if (els.sortMenu) {
-      for (const btn of els.sortMenu.querySelectorAll(".notes-sort__option")) {
-        const active = btn.dataset.sort === state.sortBy;
-        btn.classList.toggle("is-active", active);
-        btn.setAttribute("aria-selected", active ? "true" : "false");
-      }
+      syncMenuOptions(els.sortMenu, ".notes-sort__option", state.sortBy, "sort");
     }
-  }
-
-  function closeSortMenu() {
-    if (!els.sortMenu || !els.sortBtn) return;
-    els.sortMenu.hidden = true;
-    els.sortBtn.setAttribute("aria-expanded", "false");
-    els.sortBtn.classList.remove("is-open");
-  }
-
-  function openSortMenu() {
-    if (!els.sortMenu || !els.sortBtn) return;
-    closeFilterMenu();
-    els.sortMenu.hidden = false;
-    els.sortBtn.setAttribute("aria-expanded", "true");
-    els.sortBtn.classList.add("is-open");
-    updateSortLabel();
-  }
-
-  function toggleSortMenu() {
-    if (!els.sortMenu) return;
-    if (els.sortMenu.hidden) openSortMenu();
-    else closeSortMenu();
   }
 
   function setSortBy(id) {
@@ -217,21 +243,14 @@
 
   function initSortMenu() {
     if (!els.sortBtn || !els.sortMenu) return;
-    els.sortBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleSortMenu();
-    });
-    els.sortMenu.addEventListener("click", (e) => {
-      const opt = e.target.closest(".notes-sort__option");
-      if (!opt) return;
-      setSortBy(opt.dataset.sort);
-    });
-    document.addEventListener("click", (e) => {
-      if (e.target.closest(".notes-sort")) return;
-      closeSortMenu();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeSortMenu();
+    sortDropdown = createDropdown({
+      trigger: els.sortBtn,
+      menu: els.sortMenu,
+      optionSelector: ".notes-sort__option",
+      dataKey: "sort",
+      rootSelector: ".notes-sort",
+      onOpen: () => dismissOtherPopups("sort"),
+      onSelect: setSortBy,
     });
     updateSortLabel();
   }
@@ -250,7 +269,68 @@
     } else if (state.filterBy !== "all") {
       notes = notes.filter((n) => n.section === state.filterBy);
     }
+    if (state.searchQuery) {
+      const names = new Set(Object.keys(state.searchSnippets));
+      notes = notes.filter((n) => names.has(n.name));
+    }
     return notes;
+  }
+
+  function stripSnippetMarkup(snippet) {
+    return String(snippet || "").replace(/<\/?b>/gi, "").replace(/\s+/g, " ").trim();
+  }
+
+  let searchTimer = 0;
+
+  function clearSearch() {
+    state.searchQuery = "";
+    state.searchHits = null;
+    state.searchSnippets = {};
+    searchControl?.clear();
+  }
+
+  async function runSearch(query, { quiet } = {}) {
+    const q = query.trim();
+    state.searchQuery = q;
+    if (!q) {
+      state.searchHits = null;
+      state.searchSnippets = {};
+      renderBento();
+      return;
+    }
+
+    if (!quiet) els.bento.classList.add("is-loading");
+    try {
+      const hits = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      state.searchHits = hits;
+      state.searchSnippets = {};
+      for (const hit of hits) {
+        if (hit.file) state.searchSnippets[hit.file] = hit.snippet || "";
+      }
+      if (state.view === "notes") renderBento();
+    } catch (err) {
+      showError(err);
+    } finally {
+      if (!quiet) els.bento.classList.remove("is-loading");
+    }
+  }
+
+  function scheduleSearch(query) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runSearch(query), 250);
+  }
+
+  function initSearch() {
+    if (!els.searchInput) return;
+    searchControl = bindSearchInput(els.searchInput, {
+      onSearch: scheduleSearch,
+      onClear: () => {
+        state.searchQuery = "";
+        state.searchHits = null;
+        state.searchSnippets = {};
+        renderBento();
+      },
+    });
   }
 
   function updateFilterLabel() {
@@ -259,27 +339,8 @@
   }
 
   function closeFilterMenu() {
-    if (!els.filterMenu || !els.filterBtn) return;
-    els.filterMenu.hidden = true;
-    els.filterBtn.setAttribute("aria-expanded", "false");
-    els.filterBtn.classList.remove("is-open");
+    filterDropdown?.close();
     state.filterCreating = false;
-  }
-
-  function openFilterMenu() {
-    if (!els.filterMenu || !els.filterBtn) return;
-    closeSortMenu();
-    renderFilterMenu();
-    els.filterMenu.hidden = false;
-    els.filterBtn.setAttribute("aria-expanded", "true");
-    els.filterBtn.classList.add("is-open");
-    updateFilterLabel();
-  }
-
-  function toggleFilterMenu() {
-    if (!els.filterMenu) return;
-    if (els.filterMenu.hidden) openFilterMenu();
-    else closeFilterMenu();
   }
 
   function setFilterBy(id) {
@@ -296,105 +357,39 @@
     els.filterMenu.innerHTML = "";
 
     for (const f of BUILTIN_FILTERS) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "notes-filter__option";
-      btn.role = "option";
-      btn.dataset.filter = f.id;
-      btn.textContent = f.label;
-      const active = state.filterBy === f.id;
-      btn.classList.toggle("is-active", active);
-      btn.setAttribute("aria-selected", active ? "true" : "false");
-      els.filterMenu.appendChild(btn);
+      appendFilterOption(els.filterMenu, f);
     }
 
     for (const sec of state.sections) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "notes-filter__option";
-      btn.role = "option";
-      btn.dataset.filter = sec.id;
-      btn.textContent = sec.name;
-      const active = state.filterBy === sec.id;
-      btn.classList.toggle("is-active", active);
-      btn.setAttribute("aria-selected", active ? "true" : "false");
-      els.filterMenu.appendChild(btn);
+      appendFilterOption(els.filterMenu, { id: sec.id, label: sec.name });
     }
 
     if (state.filterCreating) {
-      const form = document.createElement("div");
-      form.className = "notes-filter__form";
-
-      const input = document.createElement("input");
-      input.className = "notes-filter__input";
-      input.type = "text";
-      input.placeholder = "Название раздела";
-      input.maxLength = 64;
-      input.autocomplete = "off";
-
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "notes-filter__icon-btn";
-      cancel.setAttribute("aria-label", "Отмена");
-      cancel.innerHTML = '<img src="assets/icon-close.svg" alt="">';
-
-      const confirm = document.createElement("button");
-      confirm.type = "button";
-      confirm.className = "notes-filter__icon-btn notes-filter__icon-btn--confirm";
-      confirm.setAttribute("aria-label", "Создать");
-      confirm.innerHTML = '<img src="assets/icon-check.svg" alt="">';
-
-      cancel.addEventListener("click", (e) => {
-        e.stopPropagation();
-        state.filterCreating = false;
-        renderFilterMenu();
-      });
-
-      const submit = () => {
-        const name = input.value.trim();
-        if (!name) return;
-        createSection(name).catch(showError);
-      };
-
-      confirm.addEventListener("click", (e) => {
-        e.stopPropagation();
-        submit();
-      });
-
-      input.addEventListener("keydown", (e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") {
-          e.preventDefault();
-          submit();
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
+      els.filterMenu.appendChild(createInlineForm({
+        formClass: "notes-filter__form",
+        inputClass: "notes-filter__input",
+        cancelClass: "notes-filter__icon-btn",
+        confirmClass: "notes-filter__icon-btn notes-filter__icon-btn--confirm",
+        placeholder: "Название раздела",
+        onConfirm: (name) => createSection(name).catch(showError),
+        onCancel: () => {
           state.filterCreating = false;
           renderFilterMenu();
-        }
-      });
-
-      form.append(input, cancel, confirm);
-      els.filterMenu.appendChild(form);
-      requestAnimationFrame(() => input.focus());
+        },
+      }));
       return;
     }
 
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "notes-filter__add";
-    const icon = document.createElement("span");
-    icon.className = "notes-filter__add-icon";
-    icon.innerHTML = '<img src="assets/icon-plus.png" alt="">';
-    const label = document.createElement("span");
-    label.textContent = "Новая";
-    add.append(icon, label);
-    add.addEventListener("click", (e) => {
-      e.stopPropagation();
-      state.filterCreating = true;
-      renderFilterMenu();
-    });
-    els.filterMenu.appendChild(add);
+    els.filterMenu.appendChild(createAddMenuButton({
+      className: "notes-filter__add",
+      iconSrc: "assets/icon-plus.png",
+      iconClass: "notes-filter__add-icon",
+      label: "Новая",
+      onClick: () => {
+        state.filterCreating = true;
+        renderFilterMenu();
+      },
+    }));
   }
 
   async function createSection(name) {
@@ -425,21 +420,18 @@
 
   function initFilterMenu() {
     if (!els.filterBtn || !els.filterMenu) return;
-    els.filterBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleFilterMenu();
-    });
-    els.filterMenu.addEventListener("click", (e) => {
-      const opt = e.target.closest(".notes-filter__option");
-      if (!opt) return;
-      setFilterBy(opt.dataset.filter);
-    });
-    document.addEventListener("click", (e) => {
-      if (e.target.closest(".notes-filter")) return;
-      closeFilterMenu();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeFilterMenu();
+    filterDropdown = createDropdown({
+      trigger: els.filterBtn,
+      menu: els.filterMenu,
+      optionSelector: ".notes-filter__option",
+      dataKey: "filter",
+      rootSelector: ".notes-filter",
+      onOpen: () => {
+        dismissOtherPopups("filter");
+        renderFilterMenu();
+        updateFilterLabel();
+      },
+      onSelect: setFilterBy,
     });
     updateFilterLabel();
   }
@@ -646,14 +638,15 @@
     if (visible.length === 0) {
       const empty = document.createElement("div");
       empty.className = "notes-bento__empty";
-      empty.textContent = "Нет заметок в этом разделе";
+      empty.textContent = state.searchQuery ? "Ничего не найдено" : "Нет заметок в этом разделе";
       els.bento.appendChild(empty);
       return;
     }
 
     const sorted = sortNotes(visible);
-    if (state.sortBy === "title" || state.sortBy === "title-desc") {
-      els.bento.appendChild(createNotesGroup("Заметки", sorted.length, sorted.map(createNoteCard)));
+    if (state.searchQuery || state.sortBy === "title" || state.sortBy === "title-desc") {
+      const label = state.searchQuery ? "Результаты" : "Заметки";
+      els.bento.appendChild(createNotesGroup(label, sorted.length, sorted.map(createNoteCard)));
       return;
     }
 
@@ -700,65 +693,30 @@
   }
 
   function createNoteCard(note) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "notes-card";
-    if (state.active?.name === note.name) btn.classList.add("is-active");
-    btn.title = note.name;
-
-    const body = document.createElement("div");
-    body.className = "notes-card__body";
-
-    const title = document.createElement("span");
-    title.className = "notes-card__title";
-    title.textContent = note.title || noteLabel(note.name);
-    body.appendChild(title);
-
-    const preview = document.createElement("span");
-    preview.className = "notes-card__preview";
-    preview.textContent = cardPreview(note.preview);
-    body.appendChild(preview);
-
-    btn.appendChild(body);
-
-    const date = document.createElement("span");
-    date.className = "notes-card__date";
-    date.textContent = noteCardDate(note);
-    btn.appendChild(date);
-
-    btn.addEventListener("click", () => selectNote(note.name));
-    return btn;
+    const snippet = state.searchSnippets[note.name];
+    const preview = snippet
+      ? stripSnippetMarkup(snippet) || cardPreview(note.preview)
+      : cardPreview(note.preview);
+    return createNoteCardComponent({
+      path: note.name,
+      title: note.title || noteLabel(note.name),
+      preview,
+      date: noteCardDate(note),
+      isActive: state.active?.name === note.name,
+      onClick: () => selectNote(note.name),
+      onContextMenu: (e) => openNoteContextMenu(e, note.name),
+    });
   }
 
   function createTrashCard(item) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "notes-card";
-    if (state.activeTrash?.id === item.id) btn.classList.add("is-active");
-    btn.title = item.name;
-
-    const body = document.createElement("div");
-    body.className = "notes-card__body";
-
-    const title = document.createElement("span");
-    title.className = "notes-card__title";
-    title.textContent = item.title || noteLabel(item.name);
-    body.appendChild(title);
-
-    const preview = document.createElement("span");
-    preview.className = "notes-card__preview";
-    preview.textContent = cardPreview(item.content);
-    body.appendChild(preview);
-
-    btn.appendChild(body);
-
-    const date = document.createElement("span");
-    date.className = "notes-card__date";
-    date.textContent = daysLeftLabel(item.days_left);
-    btn.appendChild(date);
-
-    btn.addEventListener("click", () => selectTrashItem(item.id));
-    return btn;
+    return createNoteCardComponent({
+      path: item.name,
+      title: item.title || noteLabel(item.name),
+      preview: cardPreview(item.content),
+      date: daysLeftLabel(item.days_left),
+      isActive: state.activeTrash?.id === item.id,
+      onClick: () => selectTrashItem(item.id),
+    });
   }
 
   function renderTrashBento() {
@@ -810,9 +768,10 @@
     state.activeTrash = null;
     els.readerPanel.hidden = true;
     els.readerEmpty.hidden = false;
+    if (els.readerFoot) els.readerFoot.hidden = true;
   }
 
-  function showReader(title, content, meta, actionLabel, danger) {
+  function showReader(title, content, meta) {
     const empty = !content || !String(content).trim();
     els.readerTitle.textContent = title;
     els.readerMeta.textContent = meta || "";
@@ -826,10 +785,14 @@
       els.readerBody.classList.remove("notes-reader__body--empty");
     }
 
-    els.readerAction.textContent = actionLabel;
-    els.readerAction.classList.toggle("notes-reader__action--danger", !!danger);
+    if (els.readerFoot) els.readerFoot.hidden = true;
     els.readerEmpty.hidden = true;
     els.readerPanel.hidden = false;
+  }
+
+  function showTrashReader(title, content, meta) {
+    showReader(title, content, meta);
+    if (els.readerFoot) els.readerFoot.hidden = false;
   }
 
   function openNoteReader(note) {
@@ -839,18 +802,14 @@
       summary?.title || noteLabel(note.name),
       note.content,
       meta,
-      "В корзину",
-      true,
     );
   }
 
   function openTrashReader(item) {
-    showReader(
+    showTrashReader(
       item.title || noteLabel(item.name),
       item.content,
       daysLeftLabel(item.days_left),
-      "Восстановить",
-      false,
     );
   }
 
@@ -858,7 +817,10 @@
     els.bento.classList.add("is-loading");
     try {
       state.notes = await api("/api/notes");
-      if (state.view === "notes") renderBento();
+      if (state.view === "notes") {
+        if (state.searchQuery) await runSearch(state.searchQuery, { quiet: true });
+        else renderBento();
+      }
     } finally {
       els.bento.classList.remove("is-loading");
     }
@@ -896,22 +858,83 @@
     }
   }
 
-  async function trashActiveNote() {
-    const name = state.active?.name;
+  async function trashNote(name) {
     if (!name) return;
-    els.readerAction.disabled = true;
-    try {
-      await api("/api/trash", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
-      removeNote(name);
-      if (state.view === "trash") await loadTrash();
-    } catch (err) {
-      showError(err);
-    } finally {
-      els.readerAction.disabled = false;
+    await api("/api/trash", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    removeNote(name);
+    if (state.view === "trash") await loadTrash();
+  }
+
+  async function moveNoteTo(name, target) {
+    let patch;
+    if (target === "important") {
+      patch = { important: true, section: "" };
+    } else {
+      patch = { section: target, important: false };
     }
+    const note = await api(`/api/notes/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    const i = state.notes.findIndex((n) => n.name === name);
+    if (i !== -1) {
+      state.notes[i] = {
+        ...state.notes[i],
+        section: note.section || "",
+        important: !!note.important,
+        modified_at: note.modified_at,
+      };
+    }
+    if (state.active?.name === name) {
+      state.active = note;
+      openNoteReader(note);
+    }
+    renderBento();
+  }
+
+  function openNoteContextMenu(e, noteName) {
+    if (state.view === "trash" || !contextMenu) return;
+    dismissOtherPopups("ctx");
+    const note = state.notes.find((n) => n.name === noteName);
+    contextMenu.openAt(e, (menu) => {
+      menu.appendChild(createSubmenuRow({
+        label: "Переместить",
+        items: sectionMoveTargets().map((t) => ({
+          id: t.id,
+          label: t.label,
+          active: noteMatchesSection(note, t.id),
+        })),
+        onSelect: (id) => {
+          closeContextMenu();
+          moveNoteTo(noteName, id).catch(showError);
+        },
+      }));
+      menu.appendChild(createContextAction({
+        label: "В корзину",
+        danger: true,
+        onClick: () => {
+          closeContextMenu();
+          trashNote(noteName).catch(showError);
+        },
+      }));
+    });
+  }
+
+  function initContextMenu() {
+    if (!els.ctxRoot || !els.ctxMenu) return;
+    contextMenu = createContextMenu({ root: els.ctxRoot, menu: els.ctxMenu });
+    contextMenu.mount();
+  }
+
+  function initPopupDismiss() {
+    registerPopupDismiss([
+      { rootSelector: ".notes-sort", close: closeSortMenu },
+      { rootSelector: ".notes-filter", close: closeFilterMenu },
+      { rootSelector: ".notes-ctx", close: closeContextMenu },
+    ]);
   }
 
   async function restoreActiveTrash() {
@@ -941,6 +964,7 @@
 
   async function showTrashView() {
     setView("trash");
+    clearSearch();
     state.active = null;
     clearReader();
     renderBento();
@@ -1209,10 +1233,12 @@
   }
   initSortMenu();
   initFilterMenu();
+  initSearch();
+  initContextMenu();
+  initPopupDismiss();
   if (els.readerAction) {
     els.readerAction.addEventListener("click", () => {
-      if (state.activeTrash) restoreActiveTrash();
-      else trashActiveNote();
+      restoreActiveTrash();
     });
   }
 
@@ -1312,4 +1338,3 @@
 
   renderChat();
   if (notesRoute()) applyScreen("notes");
-})();

@@ -117,12 +117,19 @@
       <aside class="notes-section" aria-label="Список заметок">
         <div class="notes-controls">
           <div class="notes-controls__left">
-            <div class="notes-bar notes-bar--search" aria-hidden="true">
+            <label class="notes-bar notes-bar--search">
               <span class="notes-bar__icon-slot notes-bar__icon-slot--search">
                 <img src="assets/icon-search.png" alt="">
               </span>
-              <span class="notes-bar__label">Поиск</span>
-            </div>
+              <input
+                type="search"
+                class="notes-bar__search-input notes-toolbar__search"
+                placeholder="Поиск"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Поиск заметок"
+              >
+            </label>
             <button type="button" class="notes-bar notes-bar--short notes-toolbar__add" aria-label="Новая заметка">
               <span class="notes-bar__icon-slot notes-bar__icon-slot--plus">
                 <img src="assets/icon-plus.png" alt="">
@@ -156,7 +163,7 @@
                 aria-haspopup="listbox"
                 aria-expanded="false"
               >
-                <span class="notes-bar__sort-muted">Соритровать по </span><span class="notes-toolbar__sort-label">дате изменения</span>
+                <span class="notes-bar__sort-muted">Сортировать по </span><span class="notes-toolbar__sort-label">дате изменения</span>
                 <span class="notes-bar__icon-slot notes-bar__icon-slot--chevron">
                   <img src="assets/icon-chevron.png" alt="">
                 </span>
@@ -209,8 +216,8 @@
             <span class="notes-reader__meta"></span>
             <div class="notes-reader__body"></div>
           </div>
-          <footer class="notes-reader__foot">
-            <button type="button" class="notes-reader__action"></button>
+          <footer class="notes-reader__foot" hidden>
+            <button type="button" class="notes-reader__action">Восстановить</button>
           </footer>
         </article>
       </section>
@@ -228,6 +235,10 @@
     </div>
   </dialog>
 
-  <script src="app.js"></script>
+  <div class="notes-ctx" hidden aria-hidden="true">
+    <div class="notes-ctx__menu" role="menu"></div>
+  </div>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>

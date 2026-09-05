@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	indexFileName  = ".index.db"
-	maxSearchQuery = 200
-	searchHitLimit = 8
-	snippetTokens  = 15
+	indexFileName    = ".index.db"
+	maxSearchQuery   = 200
+	searchHitLimit   = 8
+	uiSearchHitLimit = 50
+	snippetTokens    = 15
 )
 
 // SearchHit is one FTS match returned to the model.
@@ -37,9 +38,14 @@ func (n *Notes) openIndex() error {
 		db.Close()
 		return fmt.Errorf("index pragma: %w", err)
 	}
+	if _, err := db.Exec(`DROP TABLE IF EXISTS notes_fts`); err != nil {
+		db.Close()
+		return fmt.Errorf("drop fts table: %w", err)
+	}
 	if _, err := db.Exec(`
-		CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-			filepath,
+		CREATE VIRTUAL TABLE notes_fts USING fts5(
+			filepath UNINDEXED,
+			title,
 			content,
 			tokenize = 'unicode61'
 		)
@@ -73,7 +79,7 @@ func (n *Notes) rebuildIndex() error {
 		return fmt.Errorf("clear index: %w", err)
 	}
 
-	ins, err := tx.Prepare(`INSERT INTO notes_fts(filepath, content) VALUES (?, ?)`)
+	ins, err := tx.Prepare(`INSERT INTO notes_fts(filepath, title, content) VALUES (?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare index insert: %w", err)
 	}
@@ -88,7 +94,8 @@ func (n *Notes) rebuildIndex() error {
 			return nil
 		}
 		body := noteBody(string(data))
-		if _, err := ins.Exec(rel, body); err != nil {
+		title := indexTitle(rel, body)
+		if _, err := ins.Exec(rel, title, body); err != nil {
 			return fmt.Errorf("index note %q: %w", rel, err)
 		}
 		return nil
@@ -110,7 +117,7 @@ func (n *Notes) upsertIndex(name, content string) error {
 	if err := n.removeIndex(name); err != nil {
 		return err
 	}
-	if _, err := n.db.Exec(`INSERT INTO notes_fts(filepath, content) VALUES (?, ?)`, name, content); err != nil {
+	if _, err := n.db.Exec(`INSERT INTO notes_fts(filepath, title, content) VALUES (?, ?, ?)`, name, indexTitle(name, content), content); err != nil {
 		return fmt.Errorf("index insert %q: %w", name, err)
 	}
 	return nil
@@ -126,20 +133,29 @@ func (n *Notes) removeIndex(name string) error {
 	return nil
 }
 
-// Search runs an FTS5 query over indexed notes.
+// Search runs an FTS5 query over indexed notes (AI tool limit).
 func (n *Notes) Search(query string) ([]SearchHit, error) {
+	return n.search(query, searchHitLimit)
+}
+
+// SearchUI runs an FTS5 query with a higher limit for the web UI.
+func (n *Notes) SearchUI(query string) ([]SearchHit, error) {
+	return n.search(query, uiSearchHitLimit)
+}
+
+func (n *Notes) search(query string, limit int) ([]SearchHit, error) {
 	match := ftsQuery(query)
 	if match == "" {
 		return []SearchHit{}, nil
 	}
 
 	rows, err := n.db.Query(`
-		SELECT filepath, snippet(notes_fts, 1, '<b>', '</b>', '...', ?)
+		SELECT filepath, snippet(notes_fts, 2, '<b>', '</b>', '...', ?)
 		FROM notes_fts
 		WHERE notes_fts MATCH ?
-		ORDER BY rank
+		ORDER BY bm25(notes_fts, 10.0, 1.0)
 		LIMIT ?
-	`, snippetTokens, match, searchHitLimit)
+	`, snippetTokens, match, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search notes: %w", err)
 	}
@@ -154,6 +170,9 @@ func (n *Notes) Search(query string) ([]SearchHit, error) {
 		hit.Title = titleFromName(hit.File)
 		if note, err := n.Get(hit.File); err == nil {
 			hit.Title = displayTitle(note.Name, note.Content)
+		}
+		if strings.TrimSpace(hit.Snippet) == "" {
+			hit.Snippet = hit.Title
 		}
 		hits = append(hits, hit)
 	}
@@ -178,8 +197,16 @@ func ftsQuery(q string) string {
 			}
 		}
 		if b.Len() > 0 {
-			parts = append(parts, b.String())
+			parts = append(parts, b.String()+"*")
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+func indexTitle(rel, body string) string {
+	name := titleFromName(rel)
+	if h := headingTitle(body); h != "" && !strings.EqualFold(h, name) {
+		return name + " " + h
+	}
+	return name
 }

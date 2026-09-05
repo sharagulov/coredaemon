@@ -14,6 +14,19 @@ const maxBody = storage.MaxNoteSize + 4096
 
 // MountNotes registers note routes on mux.
 func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
+	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		hits, err := notes.SearchUI(q)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to search notes")
+			return
+		}
+		if hits == nil {
+			hits = []storage.SearchHit{}
+		}
+		writeJSON(w, http.StatusOK, hits)
+	})
+
 	mux.HandleFunc("GET /api/notes", func(w http.ResponseWriter, r *http.Request) {
 		list, err := notes.List()
 		if err != nil {

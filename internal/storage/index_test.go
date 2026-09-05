@@ -103,10 +103,38 @@ func TestSearch_tool(t *testing.T) {
 }
 
 func TestFtsQuery(t *testing.T) {
-	if got := ftsQuery("рецепт пирога?"); got != "рецепт пирога" {
+	if got := ftsQuery("рецепт пирога?"); got != "рецепт* пирога*" {
 		t.Fatalf("got %q", got)
 	}
 	if ftsQuery("***") != "" {
 		t.Fatal("expected empty")
+	}
+}
+
+func TestSearch_matchesTitlePrefix(t *testing.T) {
+	n := openTest(t)
+	ref := "automotive-brand/REUS/03 — Design/References.md"
+	other := "automotive-brand/REUS/02 — Vehicles/First Model.md"
+	if _, err := n.Save(ref, "# References\n\nDesign refs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Save(other, "# First Model\n\nsee 03 — Design/References/First Model/image.png"); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := n.SearchUI("Refe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].File != ref {
+		t.Fatalf("Refe hits = %+v, err = %v", hits, err)
+	}
+
+	hits, err = n.SearchUI("References")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].File != ref {
+		t.Fatalf("References hits = %+v, err = %v", hits, err)
 	}
 }
