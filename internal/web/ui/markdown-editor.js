@@ -34,8 +34,8 @@ function createToolButton({ label, iconSrc, onClick }) {
 
 export function createMarkdownEditor({ panel, onChange }) {
   const toolbar = panel.querySelector(".notes-editor__toolbar");
-  const area = panel.querySelector(".notes-editor__area");
-  const cm = mountMarkdownCM(area, { onChange });
+  const mount = panel.querySelector(".notes-editor__cm") || panel.querySelector(".notes-editor__area");
+  const cm = mountMarkdownCM(mount, { onChange });
 
   for (const item of TOOLBAR) {
     toolbar.appendChild(

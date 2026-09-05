@@ -1697,7 +1697,44 @@ body[data-screen="notes"] {
   overflow: hidden;
 }
 
-.notes-editor__area .cm-editor {
+.notes-editor__titlebar {
+  flex-shrink: 0;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid #222;
+  background: #111;
+}
+
+.notes-editor__title {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: normal;
+  outline: none;
+}
+
+.notes-editor__title::placeholder {
+  color: #555;
+}
+
+.notes-editor__title:disabled {
+  color: #fff;
+}
+
+.notes-editor__cm {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-editor__cm .cm-editor {
   flex: 1;
   min-height: 0;
 }

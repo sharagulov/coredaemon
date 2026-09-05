@@ -197,7 +197,18 @@
 
         <article class="notes-reader__panel" hidden>
           <div class="notes-editor__toolbar"></div>
-          <div class="notes-editor__area"></div>
+          <div class="notes-editor__area">
+            <div class="notes-editor__titlebar">
+              <input
+                class="notes-editor__title"
+                type="text"
+                spellcheck="true"
+                placeholder="Имя заметки"
+                maxlength="120"
+              >
+            </div>
+            <div class="notes-editor__cm"></div>
+          </div>
           <footer class="notes-reader__foot" hidden>
             <button type="button" class="notes-reader__action">Восстановить</button>
           </footer>

@@ -53,6 +53,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     readerPanel: document.querySelector(".notes-reader__panel"),
     readerFoot: document.querySelector(".notes-reader__foot"),
     readerAction: document.querySelector(".notes-reader__action"),
+    editorTitle: document.querySelector(".notes-editor__title"),
     ctxRoot: document.querySelector(".notes-ctx"),
     ctxMenu: document.querySelector(".notes-ctx__menu"),
     // Legacy (mummified — preserved for future Cloud section)
@@ -771,33 +772,77 @@ const FILTER_STORAGE_KEY = "notes-filter";
     }
   }
 
+  function editorTitleText(note) {
+    if (!note?.name) return "";
+    return note.name.replace(/^.*\//, "").replace(/\.md$/i, "").replace(/[-_]/g, " ").trim() || note.name;
+  }
+
+  function setEditorTitle(text, readOnly) {
+    if (!els.editorTitle) return;
+    els.editorTitle.value = text || "";
+    els.editorTitle.disabled = !!readOnly;
+  }
+
   function clearReader() {
     state.active = null;
     state.activeTrash = null;
     els.readerPanel.hidden = true;
     els.readerEmpty.hidden = false;
     if (els.readerFoot) els.readerFoot.hidden = true;
+    setEditorTitle("", false);
     if (noteEditor) {
       noteEditor.setContent("");
       noteEditor.setReadOnly(false);
     }
   }
 
-  function openNoteEditor(content, { readOnly = false } = {}) {
+  function openNoteEditor(content, { readOnly = false, title = "" } = {}) {
     els.readerEmpty.hidden = true;
     els.readerPanel.hidden = false;
     if (els.readerFoot) els.readerFoot.hidden = !(readOnly && state.view === "trash");
+    setEditorTitle(title, readOnly);
     noteEditor.setReadOnly(readOnly);
     noteEditor.setContent(content || "");
     if (!readOnly) noteEditor.focus();
   }
 
   function openNoteReader(note) {
-    openNoteEditor(note.content, { readOnly: false });
+    openNoteEditor(note.content, { readOnly: false, title: editorTitleText(note) });
   }
 
   function openTrashReader(item) {
-    openNoteEditor(item.content, { readOnly: true });
+    openNoteEditor(item.content, { readOnly: true, title: editorTitleText(item) });
+  }
+
+  async function commitEditorTitle() {
+    if (!els.editorTitle || !state.active?.name || state.view === "trash") return;
+    const title = els.editorTitle.value.trim() || "Заметка";
+    const current = editorTitleText(state.active);
+    if (title === current) {
+      els.editorTitle.value = current;
+      return;
+    }
+    const oldName = state.active.name;
+    try {
+      const note = await api(`/api/notes/${encodeURIComponent(oldName)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      });
+      state.active = note;
+      const i = state.notes.findIndex((n) => n.name === oldName);
+      if (i !== -1) {
+        state.notes[i] = {
+          ...state.notes[i],
+          name: note.name,
+          title: note.title || title,
+        };
+      }
+      els.editorTitle.value = editorTitleText(note);
+      renderBento();
+    } catch (err) {
+      els.editorTitle.value = current;
+      showError(err);
+    }
   }
 
   async function loadNotes() {
@@ -1230,6 +1275,22 @@ const FILTER_STORAGE_KEY = "notes-filter";
       saveNoteContent(state.active.name, content).catch(showError);
     },
   });
+  if (els.editorTitle) {
+    els.editorTitle.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        els.editorTitle.blur();
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        els.editorTitle.value = editorTitleText(state.active || state.activeTrash);
+        els.editorTitle.blur();
+      }
+    });
+    els.editorTitle.addEventListener("blur", () => {
+      commitEditorTitle();
+    });
+  }
   if (els.readerAction) {
     els.readerAction.addEventListener("click", () => {
       if (state.view !== "trash" || !state.activeTrash?.id) return;

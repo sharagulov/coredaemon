@@ -158,6 +158,7 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 		var req struct {
 			Section   *string `json:"section"`
 			Important *bool   `json:"important"`
+			Title     *string `json:"title"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -167,15 +168,26 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 			writeErr(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		if req.Section == nil && req.Important == nil {
+		if req.Section == nil && req.Important == nil && req.Title == nil {
 			writeErr(w, http.StatusBadRequest, "nothing to update")
 			return
 		}
 
-		note, err := notes.UpdateMeta(r.PathValue("name"), storage.NoteMetaInput{
-			Section:   req.Section,
-			Important: req.Important,
-		})
+		name := r.PathValue("name")
+		var note *storage.Note
+		var err error
+		if req.Title != nil {
+			note, err = notes.Rename(name, *req.Title)
+			if err == nil {
+				name = note.Name
+			}
+		}
+		if err == nil && (req.Section != nil || req.Important != nil) {
+			note, err = notes.UpdateMeta(name, storage.NoteMetaInput{
+				Section:   req.Section,
+				Important: req.Important,
+			})
+		}
 		if errors.Is(err, storage.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "note not found")
 			return

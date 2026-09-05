@@ -83,6 +83,27 @@ func TestNotes_notFound(t *testing.T) {
 	}
 }
 
+func TestNotes_Rename(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("folder/old.md", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := n.Rename("folder/old.md", "Новое имя")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "folder/Новое-имя.md" {
+		t.Fatalf("name = %q", got.Name)
+	}
+	if _, err := n.Get("folder/old.md"); err != ErrNotFound {
+		t.Fatalf("old name still exists: %v", err)
+	}
+	same, err := n.Rename(got.Name, "Новое имя")
+	if err != nil || same.Name != got.Name {
+		t.Fatalf("idempotent rename: %+v %v", same, err)
+	}
+}
+
 func TestDisplayTitle(t *testing.T) {
 	if got := displayTitle("cactus.md", "# Кактусы\n\nтекст"); got != "Кактусы" {
 		t.Fatalf("heading title = %q", got)

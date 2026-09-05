@@ -217,6 +217,92 @@ func (n *Notes) saveNote(name, content string, meta *NoteMetaInput) (*Note, erro
 	return noteFromFields(rel, fields, content), nil
 }
 
+// Rename changes the note filename from a display title, keeping the folder.
+func (n *Notes) Rename(oldName, title string) (*Note, error) {
+	oldRel, err := normalizeRelPath(oldName)
+	if err != nil {
+		return nil, err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Заметка"
+	}
+
+	dir := path.Dir(oldRel)
+	if dir == "." {
+		dir = ""
+	}
+	newRel, err := n.uniqueRel(dir, slugFromTitle(title), oldRel)
+	if err != nil {
+		return nil, err
+	}
+	if newRel == oldRel {
+		return n.Get(oldRel)
+	}
+
+	oldPath, err := n.filePath(oldRel)
+	if err != nil {
+		return nil, err
+	}
+	newPath, err := n.filePath(newRel)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("stat note: %w", err)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return nil, fmt.Errorf("rename note: %w", err)
+	}
+	if err := n.removeIndex(oldRel); err != nil {
+		return nil, err
+	}
+	note, err := n.Get(newRel)
+	if err != nil {
+		return nil, err
+	}
+	if err := n.upsertIndex(newRel, note.Content); err != nil {
+		return nil, err
+	}
+	return note, nil
+}
+
+func (n *Notes) uniqueRel(dir, slug, keep string) (string, error) {
+	if slug == "" {
+		slug = "note"
+	}
+	for i := 0; i < 10_000; i++ {
+		base := slug + ".md"
+		if i > 0 {
+			base = fmt.Sprintf("%s-%d.md", slug, i+1)
+		}
+		cand := base
+		if dir != "" {
+			cand = dir + "/" + base
+		}
+		if err := validateName(cand); err != nil {
+			return "", err
+		}
+		if cand == keep {
+			return cand, nil
+		}
+		abs, err := n.filePath(cand)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(abs); err != nil {
+			if os.IsNotExist(err) {
+				return cand, nil
+			}
+			return "", fmt.Errorf("stat note: %w", err)
+		}
+	}
+	return "", fmt.Errorf("could not allocate unique note name")
+}
+
 // UpdateMeta changes section/important flags without editing body.
 func (n *Notes) UpdateMeta(name string, meta NoteMetaInput) (*Note, error) {
 	path, err := n.filePath(name)
