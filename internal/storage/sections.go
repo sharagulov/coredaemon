@@ -101,6 +101,58 @@ func (n *Notes) CreateSection(name string) (Section, error) {
 	return sec, nil
 }
 
+// DeleteSection removes a custom section and clears it from notes.
+func (n *Notes) DeleteSection(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrSectionInvalid
+	}
+	if _, reserved := reservedSectionIDs[id]; reserved {
+		return ErrSectionInvalid
+	}
+
+	file, err := n.loadSectionsFile()
+	if err != nil {
+		return err
+	}
+
+	found := false
+	kept := make([]Section, 0, len(file.Sections))
+	for _, s := range file.Sections {
+		if s.ID == id {
+			found = true
+			continue
+		}
+		kept = append(kept, s)
+	}
+	if !found {
+		return ErrSectionNotFound
+	}
+
+	file.Sections = kept
+	if err := n.saveSectionsFile(file); err != nil {
+		return err
+	}
+	return n.clearNoteSection(id)
+}
+
+func (n *Notes) clearNoteSection(sectionID string) error {
+	list, err := n.List()
+	if err != nil {
+		return err
+	}
+	empty := ""
+	for _, sum := range list {
+		if sum.Section != sectionID {
+			continue
+		}
+		if _, err := n.UpdateMeta(sum.Name, NoteMetaInput{Section: &empty}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (n *Notes) loadSectionsFile() (sectionsFile, error) {
 	list, err := n.ListSections()
 	if err != nil {

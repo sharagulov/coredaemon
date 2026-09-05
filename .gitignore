@@ -21,3 +21,6 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Editor toolchain
+internal/web/cm/node_modules/

@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-//go:embed index.html style.css app.js ui/*.js assets/*
+//go:embed index.html style.css app.js cm-bundle.js ui/*.js assets/*
 var Files embed.FS
 
 // Mount registers static assets and SPA routes on mux.

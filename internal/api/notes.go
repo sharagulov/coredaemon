@@ -119,6 +119,38 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 		writeJSON(w, http.StatusCreated, note)
 	})
 
+	mux.HandleFunc("PUT /api/notes/{name...}", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		defer r.Body.Close()
+
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if errors.Is(err, io.EOF) {
+				writeErr(w, http.StatusBadRequest, "request body required")
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		note, err := notes.Save(r.PathValue("name"), req.Content)
+		if errors.Is(err, storage.ErrInvalidName) {
+			writeErr(w, http.StatusBadRequest, "invalid note name")
+			return
+		}
+		if errors.Is(err, storage.ErrContentTooLarge) {
+			writeErr(w, http.StatusBadRequest, "content too large")
+			return
+		}
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to save note")
+			return
+		}
+		writeJSON(w, http.StatusOK, note)
+	})
+
 	mux.HandleFunc("PATCH /api/notes/{name...}", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		defer r.Body.Close()
@@ -205,6 +237,23 @@ func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
 			return
 		}
 		writeJSON(w, http.StatusCreated, sec)
+	})
+
+	mux.HandleFunc("DELETE /api/sections/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.PathValue("id"))
+		if err := notes.DeleteSection(id); err != nil {
+			if errors.Is(err, storage.ErrSectionNotFound) {
+				writeErr(w, http.StatusNotFound, "section not found")
+				return
+			}
+			if errors.Is(err, storage.ErrSectionInvalid) {
+				writeErr(w, http.StatusBadRequest, "invalid section")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "failed to delete section")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("GET /api/trash", func(w http.ResponseWriter, r *http.Request) {

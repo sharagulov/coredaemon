@@ -6,3 +6,5 @@ export { bindSearchInput, createInlineForm } from "./input.js";
 export { createNoteCard } from "./note-card.js";
 export { createContextMenu, createSubmenuRow, createContextAction } from "./context-menu.js";
 export { registerPopupDismiss } from "./popups.js";
+export { renderMarkdown } from "./markdown.js";
+export { createMarkdownEditor } from "./markdown-editor.js";

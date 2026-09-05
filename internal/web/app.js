@@ -10,6 +10,8 @@ import {
   createSubmenuRow,
   createContextAction,
   registerPopupDismiss,
+  createMarkdownEditor,
+  renderMarkdown,
 } from "./ui/index.js";
 
 const FILTER_STORAGE_KEY = "notes-filter";
@@ -49,9 +51,6 @@ const FILTER_STORAGE_KEY = "notes-filter";
     notesCard: document.querySelector("[data-open=\"notes\"]"),
     readerEmpty: document.querySelector(".notes-reader__empty"),
     readerPanel: document.querySelector(".notes-reader__panel"),
-    readerTitle: document.querySelector(".notes-reader__title"),
-    readerMeta: document.querySelector(".notes-reader__meta"),
-    readerBody: document.querySelector(".notes-reader__body"),
     readerFoot: document.querySelector(".notes-reader__foot"),
     readerAction: document.querySelector(".notes-reader__action"),
     ctxRoot: document.querySelector(".notes-ctx"),
@@ -113,14 +112,22 @@ const FILTER_STORAGE_KEY = "notes-filter";
     return sectionId === "important" ? !!note?.important : note?.section === sectionId;
   }
 
-  function appendFilterOption(menu, { id, label }) {
-    menu.appendChild(createMenuOption({
+  function appendFilterOption(menu, { id, label, deletable = false }) {
+    const btn = createMenuOption({
       className: "notes-filter__option",
       id,
       label,
       active: state.filterBy === id,
       dataKey: "filter",
-    }));
+    });
+    if (deletable) {
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openSectionContextMenu(e, id);
+      });
+    }
+    menu.appendChild(btn);
   }
 
   let sortDropdown;
@@ -361,7 +368,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     }
 
     for (const sec of state.sections) {
-      appendFilterOption(els.filterMenu, { id: sec.id, label: sec.name });
+      appendFilterOption(els.filterMenu, { id: sec.id, label: sec.name, deletable: true });
     }
 
     if (state.filterCreating) {
@@ -407,6 +414,31 @@ const FILTER_STORAGE_KEY = "notes-filter";
     renderBento();
   }
 
+  async function deleteSection(id) {
+    await api(`/api/sections/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.sections = state.sections.filter((s) => s.id !== id);
+    if (state.filterBy === id) {
+      state.filterBy = "all";
+      localStorage.setItem(FILTER_STORAGE_KEY, "all");
+      updateFilterLabel();
+    }
+    closeContextMenu();
+    closeFilterMenu();
+    await loadNotes();
+    renderBento();
+  }
+
+  function openSectionContextMenu(e, sectionId) {
+    if (!contextMenu) return;
+    contextMenu.openAt(e, (menu) => {
+      menu.appendChild(createContextAction({
+        label: "Удалить",
+        danger: true,
+        onClick: () => deleteSection(sectionId).catch(showError),
+      }));
+    });
+  }
+
   async function loadSections() {
     state.sections = await api("/api/sections");
     if (state.filterBy !== "all" && state.filterBy !== "important") {
@@ -443,14 +475,6 @@ const FILTER_STORAGE_KEY = "notes-filter";
   function noteCardDate(note) {
     const mod = parseNoteDate(note.modified_at);
     return mod ? relativeTimeLabel(mod) : "";
-  }
-
-  function noteReaderMeta(note) {
-    const mod = parseNoteDate(note.modified_at);
-    const folder = noteFolder(note.name);
-    if (!mod) return folder;
-    const when = `изменена ${relativeTimeLabel(mod)}`;
-    return folder ? `${folder} · ${when}` : when;
   }
 
   function nextSSEBlock(buffer) {
@@ -732,35 +756,19 @@ const FILTER_STORAGE_KEY = "notes-filter";
     els.bento.appendChild(createNotesGroup("Корзина", cards.length, cards));
   }
 
-  function escapeHtml(text) {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
+  let noteEditor = null;
 
-  function stripToolMarkup(text) {
-    return text
-      .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
-      .replace(/<\/?tool_call>/gi, "")
-      .trim();
-  }
-
-  function renderMarkdown(el, text) {
-    const fences = [];
-    let html = escapeHtml(stripToolMarkup(text)).replace(/```[^\n]*\n?([\s\S]*?)```/g, (_, code) => {
-      fences.push(`<pre class="md-pre"><code>${code.replace(/\n$/, "")}</code></pre>`);
-      return `\0${fences.length - 1}\0`;
+  async function saveNoteContent(name, content) {
+    const note = await api(`/api/notes/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
     });
-
-    html = html.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
-    html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-    html = html.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,]|$)/gm, "$1<em>$2</em>");
-    html = html.replace(/^#{1,3}[ \t]+(.+)$/gm, '<span class="md-heading">$1</span>');
-    html = html.replace(/\0(\d+)\0/g, (_, i) => fences[Number(i)]);
-
-    el.innerHTML = html;
+    state.active = note;
+    const i = state.notes.findIndex((n) => n.name === name);
+    if (i !== -1) {
+      state.notes[i].modified_at = note.modified_at;
+      state.notes[i].preview = (content || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    }
   }
 
   function clearReader() {
@@ -769,48 +777,27 @@ const FILTER_STORAGE_KEY = "notes-filter";
     els.readerPanel.hidden = true;
     els.readerEmpty.hidden = false;
     if (els.readerFoot) els.readerFoot.hidden = true;
+    if (noteEditor) {
+      noteEditor.setContent("");
+      noteEditor.setReadOnly(false);
+    }
   }
 
-  function showReader(title, content, meta) {
-    const empty = !content || !String(content).trim();
-    els.readerTitle.textContent = title;
-    els.readerMeta.textContent = meta || "";
-    els.readerMeta.hidden = !meta;
-
-    if (empty) {
-      els.readerBody.textContent = "Пустая заметка";
-      els.readerBody.classList.add("notes-reader__body--empty");
-    } else {
-      renderMarkdown(els.readerBody, content);
-      els.readerBody.classList.remove("notes-reader__body--empty");
-    }
-
-    if (els.readerFoot) els.readerFoot.hidden = true;
+  function openNoteEditor(content, { readOnly = false } = {}) {
     els.readerEmpty.hidden = true;
     els.readerPanel.hidden = false;
-  }
-
-  function showTrashReader(title, content, meta) {
-    showReader(title, content, meta);
-    if (els.readerFoot) els.readerFoot.hidden = false;
+    if (els.readerFoot) els.readerFoot.hidden = !(readOnly && state.view === "trash");
+    noteEditor.setReadOnly(readOnly);
+    noteEditor.setContent(content || "");
+    if (!readOnly) noteEditor.focus();
   }
 
   function openNoteReader(note) {
-    const summary = state.notes.find((n) => n.name === note.name);
-    const meta = noteReaderMeta({ ...summary, ...note });
-    showReader(
-      summary?.title || noteLabel(note.name),
-      note.content,
-      meta,
-    );
+    openNoteEditor(note.content, { readOnly: false });
   }
 
   function openTrashReader(item) {
-    showTrashReader(
-      item.title || noteLabel(item.name),
-      item.content,
-      daysLeftLabel(item.days_left),
-    );
+    openNoteEditor(item.content, { readOnly: true });
   }
 
   async function loadNotes() {
@@ -1236,8 +1223,16 @@ const FILTER_STORAGE_KEY = "notes-filter";
   initSearch();
   initContextMenu();
   initPopupDismiss();
+  noteEditor = createMarkdownEditor({
+    panel: els.readerPanel,
+    onChange: (content) => {
+      if (!state.active?.name || state.view === "trash") return;
+      saveNoteContent(state.active.name, content).catch(showError);
+    },
+  });
   if (els.readerAction) {
     els.readerAction.addEventListener("click", () => {
+      if (state.view !== "trash" || !state.activeTrash?.id) return;
       restoreActiveTrash();
     });
   }

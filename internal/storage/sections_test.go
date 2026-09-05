@@ -77,6 +77,33 @@ func TestNoteSectionAndImportant(t *testing.T) {
 	}
 }
 
+func TestDeleteSection(t *testing.T) {
+	n := openTest(t)
+
+	sec, err := n.CreateSection("Temp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.SaveWithMeta("a.md", "body", &NoteMetaInput{Section: &sec.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.DeleteSection(sec.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := n.ListSections()
+	if err != nil || len(list) != 0 {
+		t.Fatalf("sections = %+v, err = %v", list, err)
+	}
+	got, err := n.Get("a.md")
+	if err != nil || got.Section != "" {
+		t.Fatalf("note section = %q, err = %v", got.Section, err)
+	}
+	if err := n.DeleteSection(sec.ID); err != ErrSectionNotFound {
+		t.Fatalf("delete again: %v", err)
+	}
+}
+
 func TestValidateSectionID(t *testing.T) {
 	n := openTest(t)
 	bad := "missing"
