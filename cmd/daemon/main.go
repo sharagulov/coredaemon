@@ -26,7 +26,7 @@ func main() {
 	mux := http.NewServeMux()
 	api.MountNotes(mux, notes)
 	api.MountChat(mux, agent)
-	mux.Handle("/", http.FileServer(http.FS(web.Files)))
+	web.Mount(mux)
 
 	log.Printf("listening on :8080 (ollama %s, model %s)", ollamaURL, ollamaModel)
 	log.Fatal(http.ListenAndServe(":8080", mux))
