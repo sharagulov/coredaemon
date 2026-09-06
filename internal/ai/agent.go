@@ -51,14 +51,23 @@ type ChatResult struct {
 }
 
 // Chat runs the event loop: model → tool calls → storage → model → final text.
-func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress ProgressFunc) (ChatResult, error) {
-	messages := WithToolSystem(userMessages)
+func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress ProgressFunc, scope string) (ChatResult, error) {
+	scope = strings.TrimSpace(scope)
+	messages := WithToolSystem(userMessages, a.scopeHint(scope))
+	attachedNotes, attached := a.loadAttachedNotes(scope, userMessages)
+	if attachedNotes != "" {
+		messages = append(messages, Message{Role: RoleSystem, Content: attachedNotes})
+	}
 	tools := NoteTools()
 	notesChanged := false
 	nudged := false
 	searched := false
 	blockedHit := false
 	toolFailed := false
+	found := 0
+	total := 0
+	listed := false
+	var reads []readFact
 	var createdFiles, updatedFiles []string
 	createdSet := map[string]struct{}{}
 	previous := map[string]string{}
@@ -92,7 +101,17 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			if content == "" {
 				return ChatResult{}, errors.New("empty response from ollama")
 			}
-			out := groundedContent(content, searched, matches, notesChanged, blockedHit)
+			out := groundedContent(content, groundArgs{
+				searched:     searched,
+				matches:      matches,
+				found:        found,
+				total:        total,
+				listed:       listed,
+				notesChanged: notesChanged,
+				blocked:      blockedHit,
+				reads:        reads,
+				attached:     attached,
+			})
 			return ChatResult{
 				Content:      out,
 				NotesChanged: notesChanged,
@@ -132,7 +151,7 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				continue
 			}
 
-			result, err := a.notes.RunTool(name, call.Function.Arguments)
+			result, err := a.notes.RunToolScoped(name, call.Function.Arguments, scope)
 			if err != nil {
 				return ChatResult{}, err
 			}
@@ -140,11 +159,23 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				toolFailed = true
 			}
 			logToolResult(name, result)
+			if result.Status == "success" && name == "read_note" {
+				reads = append(reads, readFact{File: result.File, Content: result.Content})
+			}
 			if name == "search_notes" && result.Status == "success" {
 				searched = true
+				listed = result.Listed
 				matches = result.Hits
 				if matches == nil {
 					matches = []storage.SearchHit{}
+				}
+				found = result.Found
+				if found < len(matches) {
+					found = len(matches)
+				}
+				total = result.Total
+				if total < found {
+					total = found
 				}
 			}
 			if result.Status == "success" && result.File != "" {
@@ -179,6 +210,25 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 	return ChatResult{}, fmt.Errorf("tool loop exceeded %d turns", maxToolTurns)
 }
 
+func (a *Agent) scopeHint(scope string) string {
+	if scope == "" {
+		return ""
+	}
+	if scope == "important" {
+		return " Работай только с заметками из раздела «Важные»."
+	}
+	sections, err := a.notes.ListSections()
+	if err != nil {
+		return ""
+	}
+	for _, s := range sections {
+		if s.ID == scope {
+			return fmt.Sprintf(" Работай только с заметками из раздела «%s».", s.Name)
+		}
+	}
+	return ""
+}
+
 func previousOrNil(previous map[string]string) map[string]string {
 	if len(previous) == 0 {
 		return nil
@@ -190,23 +240,72 @@ func isSystemReply(s string) bool {
 	return s == storage.BlockedMutationMsg || s == EmptySearchReply
 }
 
-func groundedContent(content string, searched bool, matches []storage.SearchHit, notesChanged, blocked bool) string {
-	if blocked {
+type readFact struct {
+	File    string
+	Content string
+}
+
+type groundArgs struct {
+	searched     bool
+	matches      []storage.SearchHit
+	found        int
+	total        int
+	listed       bool
+	notesChanged bool
+	blocked      bool
+	reads        []readFact
+	attached     bool
+}
+
+func groundedContent(content string, g groundArgs) string {
+	if g.blocked {
 		return storage.BlockedMutationMsg
 	}
-	if searched && !notesChanged {
-		if len(matches) == 0 {
+	if g.notesChanged {
+		return content
+	}
+	if g.attached || len(g.reads) > 0 {
+		return content
+	}
+	if g.searched {
+		if g.listed {
+			return formatNoteList(g.matches, g.found)
+		}
+		if len(g.matches) == 0 {
 			return EmptySearchReply
 		}
-		return formatSearchHits(matches)
+		return formatSearchHits(g.matches, g.found, g.total)
 	}
 	return content
 }
 
-func formatSearchHits(hits []storage.SearchHit) string {
+func formatNoteList(hits []storage.SearchHit, found int) string {
+	if found < len(hits) {
+		found = len(hits)
+	}
+	var b strings.Builder
+	b.WriteString("Всего заметок: ")
+	b.WriteString(fmt.Sprintf("%d", found))
+	for _, h := range hits {
+		b.WriteString("\n• ")
+		b.WriteString(h.File)
+	}
+	return b.String()
+}
+
+func formatSearchHits(hits []storage.SearchHit, found, total int) string {
+	if found < len(hits) {
+		found = len(hits)
+	}
 	var b strings.Builder
 	b.WriteString("Найдено: ")
-	b.WriteString(fmt.Sprintf("%d", len(hits)))
+	b.WriteString(fmt.Sprintf("%d", found))
+	if total > found {
+		b.WriteString(fmt.Sprintf(" из %d", total))
+	}
+	if found > len(hits) {
+		b.WriteString(fmt.Sprintf(" (показаны %d)", len(hits)))
+	}
 	for _, h := range hits {
 		b.WriteString("\n• ")
 		b.WriteString(h.File)

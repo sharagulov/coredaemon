@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/core-daemon/core-daemon/internal/storage"
@@ -51,7 +52,7 @@ func TestAgent_blocksDeleteNoteHoneypot(t *testing.T) {
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
 		{Role: RoleUser, Content: "old.md больше не нужна"},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestAgent_searchUsesToolHits(t *testing.T) {
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
 		{Role: RoleUser, Content: "найди заметки про шарика"},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,11 +126,82 @@ func TestAgent_emptySearchReplacesModel(t *testing.T) {
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
 		{Role: RoleUser, Content: "найди секрет"},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Content != EmptySearchReply || !result.System {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestAgent_readNotHiddenByEmptySearch(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"search_notes","arguments":{"query":"неттакого"}}},{"type":"function","function":{"name":"read_note","arguments":{"filename":"Носки.md"}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"в заметке про носки: купить носки"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Носки.md", "Нужно купить носки."); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "прочитай Носки.md"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "в заметке про носки: купить носки" {
+		t.Fatalf("content = %q", result.Content)
+	}
+}
+
+func TestAgent_listAllUsesListed(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"search_notes","arguments":{"query":""}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"их пять"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("a.md", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notes.Save("b.md", "two"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "сколько заметок"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result.Content, "Всего заметок: 2") {
+		t.Fatalf("content = %q", result.Content)
 	}
 }

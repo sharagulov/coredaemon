@@ -1652,13 +1652,55 @@ span.notes-chat__pill {
 .notes-chat__input-left {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
 }
 
 .notes-chat__attach-wrap {
   position: relative;
   flex-shrink: 0;
+}
+
+.notes-chat__scope-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.notes-chat__scope {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: #333;
+  cursor: pointer;
+}
+
+.notes-chat__scope:hover:not(:disabled) {
+  background: #444;
+}
+
+.notes-chat__scope.is-active {
+  background: #444;
+}
+
+.notes-chat__scope:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.notes-chat__icon-slot--scope {
+  width: 11px;
+  height: 11px;
+  opacity: 0.5;
+}
+
+.notes-chat__scope.is-active .notes-chat__icon-slot--scope {
+  opacity: 1;
 }
 
 .notes-chat__attach {

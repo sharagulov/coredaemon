@@ -944,6 +944,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
       { rootSelector: ".notes-chat__ctx", close: () => notesChat.closeContextMenu?.() },
       { rootSelector: ".notes-chat__title-wrap", close: notesChat.closeMenus },
       { rootSelector: ".notes-chat__attach-wrap", close: notesChat.closeMenus },
+      { rootSelector: ".notes-chat__scope-wrap", close: () => notesChat.closeMenus() },
     ]);
   }
 
@@ -1044,6 +1045,15 @@ const FILTER_STORAGE_KEY = "notes-filter";
     body: document.querySelector(".notes-body"),
     listNotes: () => sortNotes(state.notes),
     noteLabel,
+    getScopeTargets: () => [
+      { id: "", label: "Все заметки" },
+      { id: "important", label: "Важные" },
+      ...state.sections.map((s) => ({ id: s.id, label: s.name })),
+    ],
+    noteMatchesScope: (note, scope) => {
+      if (!scope) return true;
+      return noteMatchesSection(note, scope);
+    },
     onNoteEvent: (phase) => {
       if ((phase.kind === "created" || phase.kind === "updated") && phase.file) {
         upsertNote(phase.file, phase.title);

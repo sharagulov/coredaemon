@@ -32,9 +32,10 @@ type ToolCallFunction struct {
 }
 
 // WithToolSystem prepends the tool-enabled system prompt.
-func WithToolSystem(messages []Message) []Message {
+func WithToolSystem(messages []Message, scopeHint string) []Message {
+	prompt := ToolSystemPrompt + scopeHint
 	out := make([]Message, 0, len(messages)+1)
-	out = append(out, Message{Role: RoleSystem, Content: ToolSystemPrompt})
+	out = append(out, Message{Role: RoleSystem, Content: prompt})
 	out = append(out, messages...)
 	return out
 }

@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	indexFileName    = ".index.db"
-	maxSearchQuery   = 200
-	searchHitLimit   = 8
-	uiSearchHitLimit = 50
-	snippetTokens    = 15
+	indexFileName      = ".index.db"
+	maxSearchQuery     = 200
+	searchHitLimit     = 8
+	uiSearchHitLimit   = 50
+	listNotesToolLimit = 200
+	snippetTokens      = 15
 )
 
 // SearchHit is one FTS match returned to the model.
@@ -94,8 +95,8 @@ func (n *Notes) rebuildIndex() error {
 			return nil
 		}
 		body := noteBody(string(data))
-		title := indexTitle(rel, body)
-		if _, err := ins.Exec(rel, title, body); err != nil {
+		title := foldYo(indexTitle(rel, body))
+		if _, err := ins.Exec(rel, title, foldYo(body)); err != nil {
 			return fmt.Errorf("index note %q: %w", rel, err)
 		}
 		return nil
@@ -117,7 +118,7 @@ func (n *Notes) upsertIndex(name, content string) error {
 	if err := n.removeIndex(name); err != nil {
 		return err
 	}
-	if _, err := n.db.Exec(`INSERT INTO notes_fts(filepath, title, content) VALUES (?, ?, ?)`, name, indexTitle(name, content), content); err != nil {
+	if _, err := n.db.Exec(`INSERT INTO notes_fts(filepath, title, content) VALUES (?, ?, ?)`, name, foldYo(indexTitle(name, content)), foldYo(content)); err != nil {
 		return fmt.Errorf("index insert %q: %w", name, err)
 	}
 	return nil
@@ -144,6 +145,9 @@ func (n *Notes) SearchUI(query string) ([]SearchHit, error) {
 }
 
 func (n *Notes) search(query string, limit int) ([]SearchHit, error) {
+	if err := n.syncIndex(); err != nil {
+		return nil, err
+	}
 	terms := ftsTerms(query)
 	if len(terms) == 0 {
 		return []SearchHit{}, nil
@@ -220,7 +224,11 @@ func ftsTerms(q string) []string {
 		var b strings.Builder
 		for _, r := range word {
 			if unicode.IsLetter(r) || unicode.IsNumber(r) {
-				b.WriteRune(unicode.ToLower(r))
+				r = unicode.ToLower(r)
+				if r == 'ё' {
+					r = 'е'
+				}
+				b.WriteRune(r)
 			}
 		}
 		tok := b.String()
@@ -258,6 +266,29 @@ func stemToken(s string) string {
 		}
 	}
 	return s
+}
+
+func foldYo(s string) string {
+	s = strings.ReplaceAll(s, "Ё", "Е")
+	return strings.ReplaceAll(s, "ё", "е")
+}
+
+func (n *Notes) syncIndex() error {
+	if n.db == nil {
+		return nil
+	}
+	list, err := n.List()
+	if err != nil {
+		return err
+	}
+	var indexed int
+	if err := n.db.QueryRow(`SELECT count(*) FROM notes_fts`).Scan(&indexed); err != nil {
+		return fmt.Errorf("count index: %w", err)
+	}
+	if indexed == len(list) {
+		return nil
+	}
+	return n.rebuildIndex()
 }
 
 func indexTitle(rel, body string) string {

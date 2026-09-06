@@ -34,7 +34,7 @@ func TestAgent_emitsProgress(t *testing.T) {
 		{Role: RoleUser, Content: "создай заметку"},
 	}, func(p Phase) {
 		phases = append(phases, p)
-	})
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

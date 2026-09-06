@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,6 +109,49 @@ func TestSearch_tool(t *testing.T) {
 	if listed.Hits[0].File != "tea.md" {
 		t.Fatalf("listed file = %q", listed.Hits[0].File)
 	}
+
+	byFile, err := n.RunTool("search_notes", []byte(`{"query":"tea.md"}`))
+	if err != nil || byFile.Status != "success" || byFile.Found != 1 || byFile.Hits[0].File != "tea.md" {
+		t.Fatalf("filename query = %+v, err = %v", byFile, err)
+	}
+
+	commandOnly, err := n.RunTool("search_notes", []byte(`{"query":"найди заметки"}`))
+	if err != nil || commandOnly.Status != "success" || commandOnly.Found != 1 || !commandOnly.Listed {
+		t.Fatalf("command-only query = %+v, err = %v", commandOnly, err)
+	}
+	if listed.Total != 1 || !listed.Listed {
+		t.Fatalf("list meta = %+v", listed)
+	}
+}
+
+func TestSearch_tool_lookalikeFilename(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("Носки.md", "купить носки"); err != nil {
+		t.Fatal(err)
+	}
+	// Latin N + Cyrillic оски — так иногда приходит query от модели.
+	res, err := n.RunTool("search_notes", []byte(`{"query":"Nоски.md"}`))
+	if err != nil || res.Found != 1 || res.Hits[0].File != "Носки.md" {
+		t.Fatalf("lookalike search = %+v, err = %v", res, err)
+	}
+	read, err := n.RunTool("read_note", []byte(`{"filename":"Nоски.md"}`))
+	if err != nil || read.Status != "success" || read.File != "Носки.md" || !strings.Contains(read.Content, "носки") {
+		t.Fatalf("lookalike read = %+v, err = %v", read, err)
+	}
+}
+
+func TestSearch_tool_listsBeyondEight(t *testing.T) {
+	n := openTest(t)
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("n%02d.md", i)
+		if _, err := n.Save(name, "body"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := n.RunTool("search_notes", []byte(`{}`))
+	if err != nil || listed.Found != 12 || len(listed.Hits) != 12 {
+		t.Fatalf("list = found %d hits %d err %v", listed.Found, len(listed.Hits), err)
+	}
 }
 
 func TestFtsQuery(t *testing.T) {
@@ -116,6 +160,12 @@ func TestFtsQuery(t *testing.T) {
 	}
 	if got := ftsQuery("найди заметки про шарика"); got != "шарик*" {
 		t.Fatalf("got %q", got)
+	}
+	if got := ftsQuery("небоскрёбы"); got != "небоскреб*" {
+		t.Fatalf("ё fold = %q", got)
+	}
+	if ftsQuery("небоскребы") != "небоскреб*" {
+		t.Fatal("е and ё must stem the same")
 	}
 	if ftsQuery("***") != "" {
 		t.Fatal("expected empty")
@@ -142,6 +192,62 @@ func TestSearch_inflectedAndCommandWords(t *testing.T) {
 	hits, err = n.Search("техническим заданием")
 	if err != nil || len(hits) != 1 || hits[0].File != "tz.md" {
 		t.Fatalf("tz = %+v, err = %v", hits, err)
+	}
+}
+
+func TestSearch_titleWordInPunctuatedName(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("Мерседес,-БМВ-и-Ауда.md", "# Мерседес, БМВ и Ауда\n\nРассказ"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Save("Груша.md", "Груша - фрукт"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := n.RunTool("search_notes", []byte(`{"query":"мерседес"}`))
+	if err != nil || res.Found == 0 || res.Hits[0].File != "Мерседес,-БМВ-и-Ауда.md" {
+		t.Fatalf("мерседес = %+v, err = %v", res, err)
+	}
+	res, err = n.RunTool("search_notes", []byte(`{"query":"груша"}`))
+	if err != nil || res.Found == 0 || res.Hits[0].File != "Груша.md" {
+		t.Fatalf("груша = %+v, err = %v", res, err)
+	}
+}
+
+func TestSearch_yoMatchesYe(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("oblast.md", "Городской ландшафт: Небоскрёбы + горные дороги"); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := n.Search("небоскребы")
+	if err != nil || len(hits) != 1 || hits[0].File != "oblast.md" {
+		t.Fatalf("небоскребы = %+v, err = %v", hits, err)
+	}
+}
+
+func TestSearch_rebuildsAfterExternalDelete(t *testing.T) {
+	dir := t.TempDir()
+	n, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = n.Close() })
+	if _, err := n.Save("keep.md", "keep word"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Save("gone.md", "gone word"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := n.Search("gone")
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("stale hit = %+v, err = %v", hits, err)
+	}
+	listed, err := n.RunTool("search_notes", []byte(`{}`))
+	if err != nil || listed.Found != 1 {
+		t.Fatalf("list after delete = %+v, err = %v", listed, err)
 	}
 }
 

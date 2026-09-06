@@ -5,6 +5,7 @@ import {
   createBotPending,
   createChatComposer,
   createChatHeader,
+  createChatScopePicker,
   createSystemMessage,
   createUserMessage,
 } from "./chat/index.js";
@@ -22,7 +23,7 @@ function newId() {
 }
 
 function emptyChat() {
-  return { id: newId(), title: "Новый чат", messages: [] };
+  return { id: newId(), title: "Новый чат", scope: "", messages: [] };
 }
 
 function emptyStore() {
@@ -35,7 +36,7 @@ function normalizeStore(raw) {
   const chats = raw.chats.filter((c) => c && c.id);
   if (!chats.length) return null;
   return {
-    chats,
+    chats: chats.map((c) => ({ ...c, scope: c.scope || "" })),
     activeId: raw.activeId && chats.some((c) => c.id === raw.activeId)
       ? raw.activeId
       : chats[0].id,
@@ -121,7 +122,7 @@ async function readChatStream(res, onEvent) {
   throw new Error("stream ended without result");
 }
 
-async function chatStream(messages, onEvent, signal) {
+async function chatStream(messages, scope, onEvent, signal) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: {
@@ -130,7 +131,7 @@ async function chatStream(messages, onEvent, signal) {
     },
     cache: "no-store",
     signal,
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, scope: scope || "" }),
   });
   return readChatStream(res, onEvent);
 }
@@ -201,6 +202,8 @@ export function createNotesChat({
   body,
   listNotes,
   noteLabel,
+  getScopeTargets,
+  noteMatchesScope,
   onNoteEvent,
   onNotesReload,
   onOpenNote,
@@ -261,12 +264,52 @@ export function createNotesChat({
     onDelete: (id) => { deleteChat(id).catch(() => {}); },
   });
 
+  function scopedNotes() {
+    const all = listNotes() || [];
+    const scope = activeChat()?.scope || "";
+    if (!scope || !noteMatchesScope) return all;
+    return all.filter((n) => noteMatchesScope(n, scope));
+  }
+
+  function activeScopeLabel() {
+    const id = activeChat()?.scope || "";
+    if (!id) return "";
+    return getScopeTargets().find((t) => t.id === id)?.label || "";
+  }
+
+  function syncScopeChip() {
+    composer.setScopeChip(activeScopeLabel());
+  }
+
+  function setChatScope(id) {
+    if (!ready || sending) return;
+    const chat = activeChat();
+    const next = id || "";
+    if ((chat.scope || "") === next) return;
+    chat.scope = next;
+    persist();
+    scopePicker.sync();
+    syncScopeChip();
+  }
+
+  let closeAttachMenu = () => {};
+
+  const scopePicker = createChatScopePicker({
+    getTargets: getScopeTargets,
+    getActiveId: () => activeChat()?.scope || "",
+    onSelect: setChatScope,
+    onOpen: () => closeAttachMenu(),
+  });
+
   const composer = createChatComposer({
-    listNotes,
+    listNotes: scopedNotes,
     noteLabel,
+    scopePicker: scopePicker.el,
+    onClearScope: () => setChatScope(""),
     onSubmit: (text, attachments) => sendMessage(text, attachments),
     onStop: stopGenerating,
   });
+  closeAttachMenu = composer.closeMenu;
 
   root.replaceChildren(header.el, messagesEl, composer.el);
 
@@ -296,6 +339,7 @@ export function createNotesChat({
   function closeMenus() {
     header.closeMenu();
     composer.closeMenu();
+    scopePicker.close();
   }
 
   function attachNote(name) {
@@ -370,6 +414,8 @@ export function createNotesChat({
     flush();
     messagesEl.scrollTop = messagesEl.scrollHeight;
     header.setTitle(activeChat().title);
+    scopePicker.sync();
+    syncScopeChip();
   }
 
   function switchChat(id) {
@@ -477,7 +523,7 @@ export function createNotesChat({
     render();
 
     try {
-      const res = await chatStream(history(), (phase) => {
+      const res = await chatStream(history(), chat.scope || "", (phase) => {
         applyPhaseUndo(turnUndo, phase);
         onNoteEvent?.(phase);
       }, abort.signal);

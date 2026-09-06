@@ -59,7 +59,7 @@ func TestAgent_toolLoop(t *testing.T) {
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
 		{Role: RoleUser, Content: "создай заметку"},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestAgent_textToolCallCreatesNote(t *testing.T) {
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
 		{Role: RoleUser, Content: "создай заметку про мерседес"},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestAgent_blocksTrashNote(t *testing.T) {
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
 		{Role: RoleUser, Content: "old.md в архив"},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestAgent_appendReportsPrevious(t *testing.T) {
 		{Role: RoleUser, Content: "допиши keep.md"},
 	}, func(p Phase) {
 		phases = append(phases, p)
-	})
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestAgent_stopsOnCancel(t *testing.T) {
 	cancel()
 
 	agent := NewAgent(New("http://127.0.0.1:1", "m"), notes)
-	_, err = agent.Chat(ctx, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	_, err = agent.Chat(ctx, []Message{{Role: RoleUser, Content: "hi"}}, nil, "")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
 	}

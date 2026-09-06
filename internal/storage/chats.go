@@ -23,6 +23,7 @@ var ErrInvalidChats = errors.New("invalid chats")
 type Chat struct {
 	ID       string            `json:"id"`
 	Title    string            `json:"title"`
+	Scope    string            `json:"scope,omitempty"`
 	Messages []json.RawMessage `json:"messages"`
 }
 
@@ -60,6 +61,9 @@ func (n *Notes) SaveChats(store ChatStore) error {
 	cleaned, err := sanitizeChatStore(store)
 	if err != nil {
 		return err
+	}
+	for i := range cleaned.Chats {
+		cleaned.Chats[i].Scope = n.sanitizeChatScope(cleaned.Chats[i].Scope)
 	}
 	data, err := json.MarshalIndent(cleaned, "", "  ")
 	if err != nil {
@@ -131,7 +135,7 @@ func sanitizeChatStore(in ChatStore) (ChatStore, error) {
 			msgs = append([]json.RawMessage{}, msgs[len(msgs)-maxChatMessages:]...)
 		}
 
-		out.Chats = append(out.Chats, Chat{ID: id, Title: title, Messages: msgs})
+		out.Chats = append(out.Chats, Chat{ID: id, Title: title, Scope: strings.TrimSpace(c.Scope), Messages: msgs})
 	}
 
 	active := strings.TrimSpace(in.ActiveID)

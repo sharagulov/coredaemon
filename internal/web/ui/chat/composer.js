@@ -12,11 +12,13 @@ function resizeTextarea(textarea) {
  * @param {{
  *   listNotes: () => { name: string, title?: string }[],
  *   noteLabel: (name: string) => string,
+ *   scopePicker?: Element,
+ *   onClearScope?: () => void,
  *   onSubmit: (text: string, attachments: { kind: string, path: string, label: string }[]) => void,
  *   onStop?: () => void,
  * }} opts
  */
-export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
+export function createChatComposer({ listNotes, noteLabel, scopePicker, onClearScope, onSubmit, onStop }) {
   const form = el("form", "notes-chat__composer", { "aria-label": "Сообщение помощнику" });
   const box = el("div", "notes-chat__input");
   const textarea = el("textarea", "notes-chat__textarea", {
@@ -53,7 +55,9 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
   attachWrap.append(attachBtn, attachMenu);
 
   const chipsEl = el("div", "notes-chat__chips");
-  left.append(attachWrap, chipsEl);
+  left.append(attachWrap);
+  if (scopePicker) left.append(scopePicker);
+  left.append(chipsEl);
 
   const sendIcon = icon("assets/icon-chevron.png", "notes-chat__icon-slot notes-chat__icon-slot--send");
   const stopIcon = icon("assets/icon-stop.svg", "notes-chat__icon-slot notes-chat__icon-slot--stop");
@@ -65,6 +69,7 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
   form.appendChild(box);
 
   let attachments = [];
+  let scopeLabel = "";
   let generating = false;
   let attachExpanded = new Set();
 
@@ -92,6 +97,15 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
 
   function renderChips() {
     chipsEl.innerHTML = "";
+    if (scopeLabel) {
+      chipsEl.appendChild(createChatChip(
+        { kind: "folder", path: "", label: scopeLabel },
+        {
+          closable: true,
+          onRemove: () => onClearScope?.(),
+        },
+      ));
+    }
     for (const item of attachments) {
       chipsEl.appendChild(createChatChip(item, {
         closable: true,
@@ -209,6 +223,7 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
   return {
     el: form,
     rootSelector: ".notes-chat__attach-wrap",
+    scopeRootSelector: ".notes-chat__scope-wrap",
     setGenerating(on) {
       generating = !!on;
       sendBtn.type = generating ? "button" : "submit";
@@ -218,6 +233,10 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
     },
     closeMenu: dropdown.close,
     attach,
+    setScopeChip(label) {
+      scopeLabel = label || "";
+      renderChips();
+    },
     setDraft(text, items = []) {
       textarea.value = text || "";
       attachments = (items || []).map((a) => ({ ...a }));

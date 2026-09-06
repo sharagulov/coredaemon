@@ -72,18 +72,31 @@ func TestNormalizeAssistant_mergesTextCalls(t *testing.T) {
 }
 
 func TestGroundedContent(t *testing.T) {
-	got := groundedContent("выдумал три заметки", true, nil, false, false)
+	got := groundedContent("выдумал три заметки", groundArgs{searched: true})
 	if got != EmptySearchReply {
 		t.Fatalf("got %q", got)
 	}
-	if groundedContent("ok", false, nil, false, false) != "ok" {
+	if groundedContent("ok", groundArgs{}) != "ok" {
 		t.Fatal("passthrough")
 	}
-	if groundedContent("Заметка удалена", false, nil, false, true) != storage.BlockedMutationMsg {
+	if groundedContent("Заметка удалена", groundArgs{blocked: true}) != storage.BlockedMutationMsg {
 		t.Fatal("blocked should replace invented success")
 	}
 	hits := []storage.SearchHit{{File: "dog.md"}}
-	if groundedContent("выдумал десять", true, hits, false, false) != "Найдено: 1\n• dog.md" {
+	if groundedContent("выдумал десять", groundArgs{searched: true, matches: hits}) != "Найдено: 1\n• dog.md" {
 		t.Fatal("search hits should replace model text")
+	}
+	if groundedContent("пасмурность и дожди", groundArgs{
+		searched: true,
+		attached: true,
+		reads:    []readFact{{File: "oblast.md", Content: "Климат: пасмурность"}},
+	}) != "пасмурность и дожди" {
+		t.Fatal("attached note must keep the model answer")
+	}
+	if groundedContent("json dump", groundArgs{searched: true, matches: hits, found: 1, total: 72}) != "Найдено: 1 из 72\n• dog.md" {
+		t.Fatal("keyword search must show total on disk")
+	}
+	if groundedContent("пять", groundArgs{searched: true, listed: true, matches: hits, found: 72}) != "Всего заметок: 72\n• dog.md" {
+		t.Fatal("list-all must use found as total")
 	}
 }
