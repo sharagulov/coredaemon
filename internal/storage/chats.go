@@ -66,8 +66,34 @@ func (n *Notes) SaveChats(store ChatStore) error {
 		return fmt.Errorf("encode chats: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(n.chatsPath(), data, 0o644); err != nil {
+	if err := writeFileAtomic(n.chatsPath(), data); err != nil {
 		return fmt.Errorf("write chats: %w", err)
+	}
+	return nil
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".chats-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(path)
+		if err := os.Rename(tmpName, path); err != nil {
+			_ = os.Remove(tmpName)
+			return fmt.Errorf("replace: %w", err)
+		}
 	}
 	return nil
 }

@@ -13,9 +13,10 @@ function resizeTextarea(textarea) {
  *   listNotes: () => { name: string, title?: string }[],
  *   noteLabel: (name: string) => string,
  *   onSubmit: (text: string, attachments: { kind: string, path: string, label: string }[]) => void,
+ *   onStop?: () => void,
  * }} opts
  */
-export function createChatComposer({ listNotes, noteLabel, onSubmit }) {
+export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
   const form = el("form", "notes-chat__composer", { "aria-label": "Сообщение помощнику" });
   const box = el("div", "notes-chat__input");
   const textarea = el("textarea", "notes-chat__textarea", {
@@ -46,14 +47,17 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit }) {
   const chipsEl = el("div", "notes-chat__chips");
   left.append(attachWrap, chipsEl);
 
+  const sendIcon = icon("assets/icon-chevron.png", "notes-chat__icon-slot notes-chat__icon-slot--send");
+  const stopIcon = icon("assets/icon-stop.svg", "notes-chat__icon-slot notes-chat__icon-slot--stop");
   const sendBtn = el("button", "notes-chat__send", { type: "submit", "aria-label": "Отправить" });
-  sendBtn.appendChild(icon("assets/icon-chevron.png", "notes-chat__icon-slot notes-chat__icon-slot--send"));
+  sendBtn.appendChild(sendIcon);
 
   bar.append(left, sendBtn);
   box.append(textarea, bar);
   form.appendChild(box);
 
   let attachments = [];
+  let generating = false;
 
   function renderChips() {
     chipsEl.innerHTML = "";
@@ -128,8 +132,15 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit }) {
     rootSelector: ".notes-chat__attach-wrap",
   });
 
+  sendBtn.addEventListener("click", (e) => {
+    if (!generating) return;
+    e.preventDefault();
+    onStop?.();
+  });
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (generating) return;
     const text = textarea.value.trim();
     if (!text) return;
     textarea.value = "";
@@ -151,12 +162,20 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit }) {
   return {
     el: form,
     rootSelector: ".notes-chat__attach-wrap",
-    setBusy(busy) {
-      textarea.disabled = busy;
-      sendBtn.disabled = busy;
-      attachBtn.disabled = busy;
+    setGenerating(on) {
+      generating = !!on;
+      sendBtn.type = generating ? "button" : "submit";
+      sendBtn.setAttribute("aria-label", generating ? "Остановить" : "Отправить");
+      sendBtn.classList.toggle("notes-chat__send--stop", generating);
+      sendBtn.replaceChildren(generating ? stopIcon : sendIcon);
     },
     closeMenu: dropdown.close,
+    setDraft(text, items = []) {
+      textarea.value = text || "";
+      attachments = (items || []).map((a) => ({ ...a }));
+      renderChips();
+      resizeTextarea(textarea);
+    },
     focus() {
       textarea.focus();
     },

@@ -53,8 +53,6 @@ const FILTER_STORAGE_KEY = "notes-filter";
     editorTitle: document.querySelector(".notes-editor__title"),
     ctxRoot: document.querySelector(".notes-ctx"),
     ctxMenu: document.querySelector(".notes-ctx__menu"),
-    list: document.querySelector(".sidebar__list"),
-    label: document.querySelector(".sidebar__label"),
   };
 
   function noteLabel(name) {
@@ -62,12 +60,6 @@ const FILTER_STORAGE_KEY = "notes-filter";
     if (note?.title) return note.title;
     const base = name.replace(/^.*\//, "").replace(/\.md$/i, "");
     return base.replace(/[-_]/g, " ").trim() || name;
-  }
-
-  function noteFolder(name) {
-    const parts = String(name || "").split("/");
-    if (parts.length <= 1) return "";
-    return parts.slice(0, -1).join("/");
   }
 
   function cardPreview(text) {
@@ -989,7 +981,26 @@ const FILTER_STORAGE_KEY = "notes-filter";
         upsertNote(phase.file, phase.title);
       }
     },
-    onNotesReload: () => loadNotes().catch(showError),
+    onNotesReload: async () => {
+      const open = state.active?.name;
+      try {
+        await loadNotes();
+      } catch (err) {
+        showError(err);
+        return;
+      }
+      if (!open || state.view === "trash") return;
+      if (!state.notes.some((n) => n.name === open)) {
+        clearReader();
+        return;
+      }
+      try {
+        state.active = await api(`/api/notes/${encodeURIComponent(open)}`);
+        openNoteReader(state.active);
+      } catch {
+        clearReader();
+      }
+    },
     onOpenNote: (name) => selectNote(name),
   });
 

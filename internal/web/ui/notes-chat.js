@@ -78,6 +78,10 @@ function parseSSEBlock(block) {
   return { event, data: JSON.parse(data) };
 }
 
+function isAbort(err) {
+  return err?.name === "AbortError" || err?.message === "The user aborted a request.";
+}
+
 async function readChatStream(res, onEvent) {
   if (!res.ok) {
     let message = res.statusText;
@@ -105,14 +109,14 @@ async function readChatStream(res, onEvent) {
       if (!evt) continue;
       if (evt.event === "status") onEvent(evt.data);
       else if (evt.event === "done") return evt.data;
-      else if (evt.event === "error") throw new Error(evt.data.error || "ollama unavailable");
+      else if (evt.event === "error") throw new Error(evt.data.error || "не удалось получить ответ");
     }
   }
 
   throw new Error("stream ended without result");
 }
 
-async function chatStream(messages, onEvent) {
+async function chatStream(messages, onEvent, signal) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: {
@@ -120,6 +124,7 @@ async function chatStream(messages, onEvent) {
       Accept: "text/event-stream",
     },
     cache: "no-store",
+    signal,
     body: JSON.stringify({ messages }),
   });
   return readChatStream(res, onEvent);
@@ -128,6 +133,61 @@ async function chatStream(messages, onEvent) {
 function contextSuffix(items) {
   if (!items?.length) return "";
   return `\n\nКонтекст: ${items.map((a) => a.path).join(", ")}`;
+}
+
+function emptyUndo() {
+  return { created: [], previous: {} };
+}
+
+function mergeUndo(into, src) {
+  if (!src) return into;
+  for (const file of src.created || []) {
+    if (file && !into.created.includes(file)) into.created.push(file);
+  }
+  for (const [file, body] of Object.entries(src.previous || {})) {
+    if (!file || into.created.includes(file) || Object.hasOwn(into.previous, file)) continue;
+    into.previous[file] = body;
+  }
+  return into;
+}
+
+function undoFromMessages(messages) {
+  const undo = emptyUndo();
+  for (const msg of messages) mergeUndo(undo, msg);
+  return undo;
+}
+
+function applyPhaseUndo(undo, phase) {
+  if (!phase?.file) return;
+  if (phase.kind === "created") {
+    if (!undo.created.includes(phase.file)) undo.created.push(phase.file);
+    return;
+  }
+  if (phase.kind !== "updated" || undo.created.includes(phase.file) || Object.hasOwn(undo.previous, phase.file)) {
+    return;
+  }
+  if (Object.hasOwn(phase, "previous")) undo.previous[phase.file] = phase.previous;
+}
+
+function undoIsEmpty(undo) {
+  return !undo.created.length && !Object.keys(undo.previous).length;
+}
+
+async function revertNotes(undo) {
+  const res = await fetch("/api/rewind", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ created: undo.created, previous: undo.previous }),
+  });
+  if (res.ok) return;
+  let message = res.statusText;
+  try {
+    const body = await res.json();
+    if (body.error) message = body.error;
+  } catch {
+  }
+  throw new Error(message);
 }
 
 export function createNotesChat({
@@ -147,6 +207,9 @@ export function createNotesChat({
   let sending = false;
   let pending = false;
   let pendingSince = 0;
+  let abort = null;
+  let sendGate = Promise.resolve();
+  let turnUndo = emptyUndo();
 
   function activeChat() {
     return store.chats.find((c) => c.id === store.activeId) || store.chats[0];
@@ -196,6 +259,7 @@ export function createNotesChat({
     listNotes,
     noteLabel,
     onSubmit: (text, attachments) => sendMessage(text, attachments),
+    onStop: stopGenerating,
   });
 
   root.replaceChildren(header.el, messagesEl, composer.el);
@@ -217,7 +281,10 @@ export function createNotesChat({
 
   function setBusy(busy) {
     header.setBusy(busy);
-    composer.setBusy(busy);
+  }
+
+  function stopGenerating() {
+    abort?.abort();
   }
 
   function closeMenus() {
@@ -253,7 +320,7 @@ export function createNotesChat({
         turn.appendChild(createUserMessage({
           content: msg.content,
           attachments: msg.attachments,
-          onRegenerate: () => regenerate(index),
+          onRewind: () => rewind(index),
         }));
         return;
       }
@@ -304,45 +371,82 @@ export function createNotesChat({
     render();
   }
 
-  async function regenerate(index) {
-    if (!ready || sending) return;
+  async function rewind(index) {
+    if (!ready) return;
     const chat = activeChat();
     const msg = chat.messages[index];
     if (!msg || msg.role !== "user") return;
+
+    if (sending) {
+      stopGenerating();
+      await sendGate;
+    }
+    if (chat.messages[index] !== msg) return;
+
+    const undo = mergeUndo(undoFromMessages(chat.messages.slice(index)), turnUndo);
+    turnUndo = emptyUndo();
+
+    if (!undoIsEmpty(undo)) {
+      try {
+        await revertNotes(undo);
+      } catch (err) {
+        chat.messages.push({ role: "error", content: err.message });
+        persist();
+        render();
+        return;
+      }
+      try {
+        await onNotesReload?.();
+      } catch {
+      }
+    }
+
     chat.messages = chat.messages.slice(0, index);
     persist();
-    await sendMessage(msg.content, msg.attachments || []);
+    render();
+    composer.setDraft(msg.content, msg.attachments || []);
+    composer.focus();
   }
 
   async function sendMessage(text, attached = []) {
     if (!ready || sending || !text.trim()) return;
 
     const chat = activeChat();
+    let releaseGate = () => {};
+    sendGate = new Promise((resolve) => { releaseGate = resolve; });
+    abort = new AbortController();
     sending = true;
     pending = true;
     pendingSince = Date.now();
-    setBusy(true);
+    turnUndo = emptyUndo();
+    header.setBusy(true);
+    composer.setGenerating(true);
 
-    chat.messages.push({
+    const userMsg = {
       role: "user",
       content: text,
       attachments: attached.map((a) => ({ ...a })),
-    });
+    };
+    chat.messages.push(userMsg);
     if (chat.title === "Новый чат") chat.title = titleFromText(text);
     await persist();
     render();
 
     try {
       const res = await chatStream(history(), (phase) => {
+        applyPhaseUndo(turnUndo, phase);
         onNoteEvent?.(phase);
-      });
+      }, abort.signal);
+
+      if (!chat.messages.includes(userMsg)) return;
 
       chat.messages.push({
         role: "assistant",
         content: res.content,
         at: Date.now(),
-        created: res.created || [],
+        created: res.created || turnUndo.created,
         updated: res.updated || [],
+        previous: res.previous || turnUndo.previous,
         searched: !!res.searched,
         matches: res.matches || [],
         thoughtSec: Math.max(1, Math.round((Date.now() - pendingSince) / 1000)),
@@ -350,14 +454,27 @@ export function createNotesChat({
 
       if (res.notes_changed) await onNotesReload?.();
     } catch (err) {
-      chat.messages.push({ role: "error", content: err.message });
+      if (!chat.messages.includes(userMsg)) return;
+      if (isAbort(err)) {
+        if (!undoIsEmpty(turnUndo)) {
+          userMsg.created = turnUndo.created;
+          userMsg.previous = turnUndo.previous;
+        }
+      } else {
+        chat.messages.push({ role: "error", content: err.message });
+      }
     } finally {
+      abort = null;
       sending = false;
       pending = false;
-      setBusy(false);
-      await persist();
-      render();
-      composer.focus();
+      header.setBusy(false);
+      composer.setGenerating(false);
+      releaseGate();
+      if (chat.messages.includes(userMsg)) {
+        await persist();
+        render();
+        composer.focus();
+      }
     }
   }
 

@@ -14,6 +14,29 @@ const maxBody = storage.MaxNoteSize + 4096
 
 // MountNotes registers note routes on mux.
 func MountNotes(mux *http.ServeMux, notes *storage.Notes) {
+	mux.HandleFunc("POST /api/rewind", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, storage.MaxNoteSize*8+4096)
+		defer r.Body.Close()
+
+		var req struct {
+			Created  []string          `json:"created"`
+			Previous map[string]string `json:"previous"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if errors.Is(err, io.EOF) {
+				writeErr(w, http.StatusBadRequest, "request body required")
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if err := notes.RevertChanges(req.Created, req.Previous); err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to rewind notes")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		hits, err := notes.SearchUI(q)

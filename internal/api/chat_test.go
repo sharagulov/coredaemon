@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,5 +116,23 @@ func TestChat_contextCancel(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "event: error") {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "запрос отменён") {
+		t.Fatalf("want cancelled message, body = %s", rec.Body.String())
+	}
+}
+
+func TestChatErrorMessage(t *testing.T) {
+	if got := chatErrorMessage(context.Canceled); got != "запрос отменён" {
+		t.Fatalf("canceled = %q", got)
+	}
+	if got := chatErrorMessage(errors.New("request ollama: connect")); got != "не удалось связаться с Ollama" {
+		t.Fatalf("connect = %q", got)
+	}
+	if got := chatErrorMessage(errors.New("empty response from ollama")); got != "модель вернула пустой ответ" {
+		t.Fatalf("empty = %q", got)
+	}
+	if got := chatErrorMessage(errors.New("tool loop exceeded 8 turns")); got != "агент слишком долго вызывал инструменты" {
+		t.Fatalf("loop = %q", got)
 	}
 }

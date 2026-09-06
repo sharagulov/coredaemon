@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -62,7 +63,7 @@ func MountChat(mux *http.ServeMux, agent *ai.Agent) {
 		})
 		if err != nil {
 			log.Printf("chat: %v", err)
-			_ = stream.Send("error", map[string]string{"error": "ollama unavailable"})
+			_ = stream.Send("error", map[string]string{"error": chatErrorMessage(err)})
 			return
 		}
 
@@ -101,4 +102,28 @@ func normalizeChatMessages(in []ai.Message) ([]ai.Message, error) {
 		return nil, errors.New("last message must be from user")
 	}
 	return out, nil
+}
+
+func chatErrorMessage(err error) string {
+	if err == nil {
+		return "неизвестная ошибка"
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "запрос отменён"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "request ollama"),
+		strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "no such host"):
+		return "не удалось связаться с Ollama"
+	case strings.Contains(msg, "empty response"):
+		return "модель вернула пустой ответ"
+	case strings.Contains(msg, "tool loop exceeded"):
+		return "агент слишком долго вызывал инструменты"
+	case strings.Contains(msg, "ollama status"):
+		return "Ollama вернула ошибку"
+	default:
+		return "не удалось получить ответ"
+	}
 }

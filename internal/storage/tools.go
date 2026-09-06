@@ -21,13 +21,15 @@ const BlockedMutationMsg = "нельзя удалять или перемеща�
 
 // ToolResult is returned to the model after a tool call.
 type ToolResult struct {
-	Status  string      `json:"status"`
-	File    string      `json:"file,omitempty"`
-	Title   string      `json:"title,omitempty"`
-	Content string      `json:"content,omitempty"`
-	Hits    []SearchHit `json:"hits,omitempty"`
-	Found   int         `json:"found,omitempty"`
-	Error   string      `json:"error,omitempty"`
+	Status   string      `json:"status"`
+	File     string      `json:"file,omitempty"`
+	Title    string      `json:"title,omitempty"`
+	Content  string      `json:"content,omitempty"`
+	Hits     []SearchHit `json:"hits,omitempty"`
+	Found    int         `json:"found,omitempty"`
+	Error    string      `json:"error,omitempty"`
+	Previous string      `json:"-"`
+	NewFile  bool        `json:"-"`
 }
 
 // CreateNote creates a new note file from a title and content.
@@ -63,6 +65,43 @@ func (n *Notes) AppendToNote(name, content string) (*Note, error) {
 	return n.Save(name, joined)
 }
 
+// RevertChanges undoes agent writes: restore previous bodies, then trash created files.
+func (n *Notes) RevertChanges(created []string, previous map[string]string) error {
+	trash := make([]string, 0, len(created))
+	seen := make(map[string]struct{}, len(created))
+	for _, name := range created {
+		rel, err := normalizeRelPath(normalizeFilename(name))
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		seen[rel] = struct{}{}
+		trash = append(trash, rel)
+	}
+
+	for name, content := range previous {
+		rel, err := normalizeRelPath(normalizeFilename(name))
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		if _, err := n.Save(rel, content); err != nil {
+			return err
+		}
+	}
+
+	for _, rel := range trash {
+		if _, err := n.Trash(rel); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
 // RunTool executes one of the allowed note tools.
 func (n *Notes) RunTool(toolName string, args json.RawMessage) (ToolResult, error) {
 	switch toolName {
@@ -89,11 +128,21 @@ func (n *Notes) RunTool(toolName string, args json.RawMessage) (ToolResult, erro
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{Status: "error", Error: "invalid arguments"}, nil
 		}
+		name := normalizeFilename(p.Filename)
+		existing, err := n.Get(name)
+		isNew := errors.Is(err, ErrNotFound)
+		if err != nil && !isNew {
+			return ToolResult{Status: "error", Error: err.Error()}, nil
+		}
+		var previous string
+		if !isNew {
+			previous = existing.Content
+		}
 		note, err := n.AppendToNote(p.Filename, p.Content)
 		if err != nil {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
-		return ToolResult{Status: "success", File: note.Name}, nil
+		return ToolResult{Status: "success", File: note.Name, Previous: previous, NewFile: isNew}, nil
 
 	case "read_note":
 		var p struct {

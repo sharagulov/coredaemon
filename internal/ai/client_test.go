@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -150,5 +151,76 @@ func TestAgent_blocksTrashNote(t *testing.T) {
 	}
 	if _, err := notes.Get("old.md"); err != nil {
 		t.Fatalf("note should remain: %v", err)
+	}
+}
+
+func TestAgent_appendReportsPrevious(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"append_to_note","arguments":{"filename":"keep.md","content":"more"}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"дописал"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("keep.md", "v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	var phases []Phase
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "допиши keep.md"},
+	}, func(p Phase) {
+		phases = append(phases, p)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Updated) != 1 || result.Updated[0] != "keep.md" {
+		t.Fatalf("updated = %v", result.Updated)
+	}
+	if result.Previous["keep.md"] != "v1" {
+		t.Fatalf("previous = %v", result.Previous)
+	}
+	got, err := notes.Get("keep.md")
+	if err != nil || !strings.Contains(got.Content, "more") {
+		t.Fatalf("note = %+v, err = %v", got, err)
+	}
+
+	var sawPrev bool
+	for _, p := range phases {
+		if p.Kind == "updated" && p.Previous != nil && *p.Previous == "v1" {
+			sawPrev = true
+		}
+	}
+	if !sawPrev {
+		t.Fatalf("phases = %+v", phases)
+	}
+}
+
+func TestAgent_stopsOnCancel(t *testing.T) {
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	agent := NewAgent(New("http://127.0.0.1:1", "m"), notes)
+	_, err = agent.Chat(ctx, []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
 	}
 }

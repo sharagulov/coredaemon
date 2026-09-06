@@ -61,6 +61,22 @@ func TestChats_hiddenFromNotesList(t *testing.T) {
 	}
 }
 
+func TestChats_overwrite(t *testing.T) {
+	n := openTest(t)
+	first := ChatStore{ActiveID: "a", Chats: []Chat{{ID: "a", Title: "один"}}}
+	second := ChatStore{ActiveID: "b", Chats: []Chat{{ID: "b", Title: "два"}}}
+	if err := n.SaveChats(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SaveChats(second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := n.LoadChats()
+	if err != nil || got.ActiveID != "b" || len(got.Chats) != 1 || got.Chats[0].Title != "два" {
+		t.Fatalf("store = %+v, err = %v", got, err)
+	}
+}
+
 func TestChats_rejectBadID(t *testing.T) {
 	n := openTest(t)
 	err := n.SaveChats(ChatStore{Chats: []Chat{{ID: "../x", Title: "x"}}})

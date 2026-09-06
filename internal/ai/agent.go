@@ -48,6 +48,7 @@ type ChatResult struct {
 	NotesChanged bool                `json:"notes_changed"`
 	Created      []string            `json:"created,omitempty"`
 	Updated      []string            `json:"updated,omitempty"`
+	Previous     map[string]string   `json:"previous,omitempty"`
 	Searched     bool                `json:"searched,omitempty"`
 	Matches      []storage.SearchHit `json:"matches,omitempty"`
 }
@@ -60,9 +61,14 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 	nudged := false
 	searched := false
 	var createdFiles, updatedFiles []string
+	createdSet := map[string]struct{}{}
+	previous := map[string]string{}
 	var matches []storage.SearchHit
 
 	for turn := 0; turn < maxToolTurns; turn++ {
+		if err := ctx.Err(); err != nil {
+			return ChatResult{}, err
+		}
 		emitProgress(progress, Phase{Kind: "thinking"})
 		msg, err := a.client.ChatOnce(ctx, messages, tools)
 		if err != nil {
@@ -85,6 +91,7 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				NotesChanged: notesChanged,
 				Created:      createdFiles,
 				Updated:      updatedFiles,
+				Previous:     previousOrNil(previous),
 				Searched:     searched,
 				Matches:      matches,
 			}, nil
@@ -94,6 +101,9 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 		messages = append(messages, msg)
 
 		for _, call := range msg.ToolCalls {
+			if err := ctx.Err(); err != nil {
+				return ChatResult{}, err
+			}
 			if call.Type != "" && call.Type != "function" {
 				continue
 			}
@@ -130,11 +140,24 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				case "create_note":
 					notesChanged = true
 					createdFiles = append(createdFiles, result.File)
+					createdSet[result.File] = struct{}{}
 					emitProgress(progress, Phase{Kind: "created", File: result.File, Title: result.Title})
 				case "append_to_note":
 					notesChanged = true
+					if result.NewFile {
+						createdFiles = append(createdFiles, result.File)
+						createdSet[result.File] = struct{}{}
+						emitProgress(progress, Phase{Kind: "created", File: result.File, Title: result.Title})
+						break
+					}
+					if _, created := createdSet[result.File]; !created {
+						if _, seen := previous[result.File]; !seen {
+							previous[result.File] = result.Previous
+						}
+					}
 					updatedFiles = append(updatedFiles, result.File)
-					emitProgress(progress, Phase{Kind: "updated", File: result.File, Title: result.Title})
+					prev := result.Previous
+					emitProgress(progress, Phase{Kind: "updated", File: result.File, Title: result.Title, Previous: &prev})
 				}
 			}
 			messages = append(messages, toolMessage(name, result))
@@ -142,6 +165,13 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 	}
 
 	return ChatResult{}, fmt.Errorf("tool loop exceeded %d turns", maxToolTurns)
+}
+
+func previousOrNil(previous map[string]string) map[string]string {
+	if len(previous) == 0 {
+		return nil
+	}
+	return previous
 }
 
 func groundedContent(content string, searched bool, matches []storage.SearchHit, notesChanged bool) string {

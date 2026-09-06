@@ -39,7 +39,7 @@ func TestNotes_CreateAppendReadTool(t *testing.T) {
 	}
 
 	res, err = n.RunTool("append_to_note", []byte(`{"filename":"`+created.Name+`","content":"- call mom"}`))
-	if err != nil || res.Status != "success" {
+	if err != nil || res.Status != "success" || res.NewFile || res.Previous != created.Content {
 		t.Fatalf("append = %+v, err = %v", res, err)
 	}
 
@@ -220,5 +220,55 @@ func TestNotes_RunTool_rejectsUnknown(t *testing.T) {
 	res, err := n.RunTool("delete_all", []byte(`{}`))
 	if err != nil || res.Status != "error" {
 		t.Fatalf("res = %+v, err = %v", res, err)
+	}
+}
+
+func TestNotes_RunTool_appendMissingIsNew(t *testing.T) {
+	n := openTest(t)
+	res, err := n.RunTool("append_to_note", []byte(`{"filename":"fresh.md","content":"hello"}`))
+	if err != nil || res.Status != "success" || !res.NewFile || res.File != "fresh.md" || res.Previous != "" {
+		t.Fatalf("append missing = %+v, err = %v", res, err)
+	}
+}
+
+func TestNotes_RevertChanges_restoreAndTrash(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("keep.md", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Save("keep.md", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Save("gone.md", "new"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.RevertChanges([]string{"gone.md"}, map[string]string{"keep.md": "v1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := n.Get("keep.md")
+	if err != nil || got.Content != "v1" {
+		t.Fatalf("keep = %+v, err = %v", got, err)
+	}
+	if _, err := n.Get("gone.md"); err != ErrNotFound {
+		t.Fatalf("gone should be trashed: %v", err)
+	}
+	items, err := n.ListTrash()
+	if err != nil || len(items) != 1 || items[0].Name != "gone.md" {
+		t.Fatalf("trash = %+v, err = %v", items, err)
+	}
+}
+
+func TestNotes_RevertChanges_createdWins(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("only.md", "after"); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.RevertChanges([]string{"only.md"}, map[string]string{"only.md": "before"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Get("only.md"); err != ErrNotFound {
+		t.Fatalf("created file should be trashed, not restored: %v", err)
 	}
 }

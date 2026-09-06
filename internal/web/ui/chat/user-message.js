@@ -6,10 +6,10 @@ import { createChatIconButton } from "./icon-btn.js";
  * @param {{
  *   content: string,
  *   attachments?: { kind: string, path: string, label: string }[],
- *   onRegenerate?: () => void,
+ *   onRewind?: () => void,
  * }} opts
  */
-export function createUserMessage({ content, attachments, onRegenerate }) {
+export function createUserMessage({ content, attachments, onRewind }) {
   const card = el("div", "notes-chat__user");
   const text = el("p", "notes-chat__user-text");
   text.textContent = content;
@@ -24,10 +24,10 @@ export function createUserMessage({ content, attachments, onRegenerate }) {
   }
 
   card.appendChild(createChatIconButton({
-    ariaLabel: "Повторить",
+    ariaLabel: "Откатить",
     iconSrc: "assets/icon-return.png",
     extraClass: "notes-chat__icon-btn--on-user",
-    onClick: onRegenerate,
+    onClick: onRewind,
   }));
   return card;
 }
