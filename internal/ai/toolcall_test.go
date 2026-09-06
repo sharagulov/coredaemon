@@ -69,7 +69,7 @@ func TestNormalizeAssistant_mergesTextCalls(t *testing.T) {
 
 func TestGroundedContent(t *testing.T) {
 	got := groundedContent("выдумал три заметки", true, nil, false)
-	if got != "По этому запросу в заметках ничего не найдено." {
+	if got != EmptySearchReply {
 		t.Fatalf("got %q", got)
 	}
 	if groundedContent("ok", false, nil, false) != "ok" {

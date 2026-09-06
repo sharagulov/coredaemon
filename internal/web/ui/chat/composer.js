@@ -1,7 +1,7 @@
 import { el, icon } from "../dom.js";
 import { createDropdown } from "../dropdown.js";
-import { createMenuOption } from "../menu-option.js";
-import { createChatChip, fileLabel, folderLabel, noteFolder } from "./chip.js";
+import { createChatChip, fileLabel, folderLabel } from "./chip.js";
+import { renderAttachMenu } from "./attach-menu.js";
 
 function resizeTextarea(textarea) {
   textarea.style.height = "auto";
@@ -58,6 +58,29 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
 
   let attachments = [];
   let generating = false;
+  let attachExpanded = new Set();
+
+  function clearAttachMenuPos() {
+    attachMenu.style.left = "";
+    attachMenu.style.maxWidth = "";
+  }
+
+  function fitAttachMenu() {
+    if (attachMenu.hidden) return;
+    attachMenu.style.left = "0px";
+    const pad = 8;
+    const chat = attachWrap.closest(".notes-chat");
+    const box = chat?.getBoundingClientRect();
+    const leftBound = Math.max(pad, (box?.left ?? 0) + pad);
+    const rightBound = Math.min(window.innerWidth - pad, (box?.right ?? window.innerWidth) - pad);
+    attachMenu.style.maxWidth = `${Math.max(0, Math.min(420, rightBound - leftBound))}px`;
+    const wrap = attachWrap.getBoundingClientRect();
+    const menu = attachMenu.getBoundingClientRect();
+    let left = 0;
+    if (menu.right > rightBound) left -= menu.right - rightBound;
+    if (wrap.left + left < leftBound) left = leftBound - wrap.left;
+    attachMenu.style.left = `${Math.round(left)}px`;
+  }
 
   function renderChips() {
     chipsEl.innerHTML = "";
@@ -72,47 +95,31 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
     }
   }
 
-  function renderAttachMenu() {
-    attachMenu.innerHTML = "";
-    const notes = listNotes() || [];
-    const taken = new Set(attachments.map((a) => `${a.kind}:${a.path}`));
-    const folders = new Set();
-    for (const note of notes) {
-      const folder = noteFolder(note.name);
-      if (folder) folders.add(folder);
-    }
-
-    for (const folder of [...folders].sort()) {
-      const key = `folder:${folder}`;
-      if (taken.has(key)) continue;
-      attachMenu.appendChild(createMenuOption({
-        className: "notes-chat__option",
-        id: key,
-        label: folderLabel(folder),
-        dataKey: "value",
-      }));
-    }
-    for (const note of notes) {
-      const key = `file:${note.name}`;
-      if (taken.has(key)) continue;
-      attachMenu.appendChild(createMenuOption({
-        className: "notes-chat__option",
-        id: key,
-        label: note.title || noteLabel(note.name),
-        dataKey: "value",
-      }));
-    }
-    if (!attachMenu.children.length) {
-      const empty = el("div", "notes-chat__option notes-chat__option--empty");
-      empty.textContent = "Нечего прикрепить";
-      attachMenu.appendChild(empty);
-    }
+  function renderAttachList() {
+    renderAttachMenu(attachMenu, {
+      notes: listNotes() || [],
+      taken: new Set(attachments.map((a) => `${a.kind}:${a.path}`)),
+      expanded: attachExpanded,
+      noteLabel,
+    });
   }
+
+  attachMenu.addEventListener("click", (e) => {
+    const toggle = e.target.closest(".notes-chat__attach-toggle");
+    if (!toggle) return;
+    e.stopPropagation();
+    const path = toggle.dataset.path;
+    if (!path) return;
+    if (attachExpanded.has(path)) attachExpanded.delete(path);
+    else attachExpanded.add(path);
+    renderAttachList();
+    fitAttachMenu();
+  });
 
   const dropdown = createDropdown({
     trigger: attachBtn,
     menu: attachMenu,
-    optionSelector: ".notes-chat__option[data-value]",
+    optionSelector: ".notes-chat__attach-row[data-value]",
     dataKey: "value",
     onSelect: (value) => {
       const i = value.indexOf(":");
@@ -128,8 +135,20 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
       renderChips();
       dropdown.close();
     },
-    onOpen: renderAttachMenu,
+    onOpen: () => {
+      attachExpanded.clear();
+      renderAttachList();
+      queueMicrotask(fitAttachMenu);
+    },
+    onClose: clearAttachMenuPos,
     rootSelector: ".notes-chat__attach-wrap",
+  });
+
+  window.addEventListener("resize", fitAttachMenu);
+  queueMicrotask(() => {
+    const chatEl = attachWrap.closest(".notes-chat");
+    if (typeof ResizeObserver === "undefined" || !chatEl) return;
+    new ResizeObserver(() => fitAttachMenu()).observe(chatEl);
   });
 
   sendBtn.addEventListener("click", (e) => {

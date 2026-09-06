@@ -11,11 +11,7 @@ import (
 	"github.com/core-daemon/core-daemon/internal/storage"
 )
 
-const (
-	maxToolTurns = 8
-	answerNudge  = "Ответь пользователю по результатам инструментов обычным текстом. " +
-		"Не пиши XML и не повторяй вызовы, если результат уже получен."
-)
+const maxToolTurns = 8
 
 var allowedTools = map[string]bool{
 	"create_note":    true,
@@ -80,7 +76,7 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			content := strings.TrimSpace(msg.Content)
 			if content == "" && !nudged {
 				nudged = true
-				messages = append(messages, Message{Role: RoleUser, Content: answerNudge})
+				messages = append(messages, Message{Role: RoleSystem, Content: AnswerNudge})
 				continue
 			}
 			if content == "" {
@@ -176,7 +172,7 @@ func previousOrNil(previous map[string]string) map[string]string {
 
 func groundedContent(content string, searched bool, matches []storage.SearchHit, notesChanged bool) string {
 	if searched && len(matches) == 0 && !notesChanged {
-		return "По этому запросу в заметках ничего не найдено."
+		return EmptySearchReply
 	}
 	return content
 }

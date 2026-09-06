@@ -974,7 +974,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     root: document.querySelector(".notes-chat"),
     toggle: document.querySelector(".notes-header__chat-toggle"),
     body: document.querySelector(".notes-body"),
-    listNotes: () => state.notes,
+    listNotes: () => sortNotes(state.notes),
     noteLabel,
     onNoteEvent: (phase) => {
       if ((phase.kind === "created" || phase.kind === "updated") && phase.file) {

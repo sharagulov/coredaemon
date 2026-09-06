@@ -17,7 +17,7 @@ var (
 )
 
 // BlockedMutationMsg is returned when the model tries to delete or move notes.
-const BlockedMutationMsg = "нельзя удалять или перемещать заметки в целях безопасности"
+const BlockedMutationMsg = "удаление и перемещение недоступны"
 
 // ToolResult is returned to the model after a tool call.
 type ToolResult struct {
