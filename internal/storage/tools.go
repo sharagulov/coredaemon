@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -129,6 +130,23 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
 		title := cleanTitle(p.Title)
+		if hit, ok := n.lookupNoteHit(title); ok {
+			slug := normalizeFilename(slugFromTitle(title))
+			if hit.File != slug {
+				existing, err := n.Get(hit.File)
+				if err != nil {
+					return ToolResult{Status: "error", Error: err.Error()}, nil
+				}
+				if !NoteMatchesScope(existing.Section, existing.Important, scope) {
+					return ToolResult{Status: "error", Error: "note not in scope"}, nil
+				}
+				note, err := n.AppendToNote(hit.File, p.Content)
+				if err != nil {
+					return ToolResult{Status: "error", Error: err.Error()}, nil
+				}
+				return ToolResult{Status: "success", File: note.Name, Title: title, Previous: existing.Content}, nil
+			}
+		}
 		note, err := n.CreateNote(title, p.Content)
 		if err != nil {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
@@ -137,7 +155,7 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 		if err != nil {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
-		return ToolResult{Status: "success", File: note.Name, Title: title}, nil
+		return ToolResult{Status: "success", File: note.Name, Title: title, NewFile: true}, nil
 
 	case "append_to_note":
 		var p struct {
@@ -153,6 +171,14 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 		name := normalizeFilename(p.Filename)
 		existing, err := n.Get(name)
 		isNew := errors.Is(err, ErrNotFound)
+		if isNew {
+			// Неточное имя от модели не должно плодить дубликат: сначала ищем существующую заметку.
+			if hit, ok := n.lookupNoteHit(p.Filename); ok {
+				name = hit.File
+				existing, err = n.Get(name)
+				isNew = errors.Is(err, ErrNotFound)
+			}
+		}
 		if err != nil && !isNew {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
@@ -163,7 +189,7 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 		if !isNew {
 			previous = existing.Content
 		}
-		note, err := n.AppendToNote(p.Filename, p.Content)
+		note, err := n.AppendToNote(name, p.Content)
 		if err != nil {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
@@ -342,6 +368,15 @@ func titleKey(s string) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
+func titleWordsKey(s string) string {
+	parts := strings.Fields(titleKey(s))
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, " ")
+}
+
 func slugFromTitle(title string) string {
 	slug := invalidFilenameChars.ReplaceAllString(strings.TrimSpace(title), "")
 	slug = strings.ReplaceAll(slug, " ", "-")
@@ -434,7 +469,7 @@ func (n *Notes) lookupNoteHit(query string) (SearchHit, bool) {
 			return noteHit(note), true
 		}
 	}
-	key := titleKey(strings.TrimSuffix(stripNameWrap(query), ".md"))
+	key := titleWordsKey(strings.TrimSuffix(stripNameWrap(query), ".md"))
 	if key == "" {
 		return SearchHit{}, false
 	}
@@ -444,7 +479,7 @@ func (n *Notes) lookupNoteHit(query string) (SearchHit, bool) {
 	}
 	for _, note := range list {
 		base := strings.TrimSuffix(path.Base(note.Name), path.Ext(note.Name))
-		if titleKey(base) == key || titleKey(note.Title) == key {
+		if titleWordsKey(base) == key || titleWordsKey(note.Title) == key {
 			return SearchHit{File: note.Name, Title: note.Title, Snippet: note.Preview}, true
 		}
 	}

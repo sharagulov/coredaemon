@@ -231,6 +231,101 @@ func TestNotes_RunTool_appendMissingIsNew(t *testing.T) {
 	}
 }
 
+func TestRunTool_appendResolvesExistingName(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("Мышь-полевая.md", "первая строка"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := n.RunTool("append_to_note", []byte(`{"filename":"мышь полевая","content":"вторая строка"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "success" || res.File != "Мышь-полевая.md" || res.NewFile {
+		t.Fatalf("res = %+v", res)
+	}
+
+	list, err := n.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	note, err := n.Get("Мышь-полевая.md")
+	if err != nil || !strings.Contains(note.Content, "первая строка") || !strings.Contains(note.Content, "вторая строка") {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+}
+
+func TestRunTool_appendStillCreatesUnknownNote(t *testing.T) {
+	n := openTest(t)
+	res, err := n.RunTool("append_to_note", []byte(`{"filename":"Совсем-новая.md","content":"текст"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "success" || !res.NewFile || res.File != "Совсем-новая.md" {
+		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestRunTool_appendResolvesWordOrder(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("Мышь-полевая.md", "первая строка"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := n.RunTool("append_to_note", []byte(`{"filename":"Полевая-мышь.md","content":"вторая строка"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "success" || res.File != "Мышь-полевая.md" || res.NewFile {
+		t.Fatalf("res = %+v", res)
+	}
+
+	list, err := n.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	note, err := n.Get("Мышь-полевая.md")
+	if err != nil || !strings.Contains(note.Content, "первая строка") || !strings.Contains(note.Content, "вторая строка") {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+}
+
+func TestRunTool_createSameTitleGetsUniqueName(t *testing.T) {
+	n := openTest(t)
+	first, err := n.RunTool("create_note", []byte(`{"title":"Мышь полевая","content":"одна"}`))
+	if err != nil || first.Status != "success" || first.File != "Мышь-полевая.md" || !first.NewFile {
+		t.Fatalf("first = %+v, err = %v", first, err)
+	}
+	second, err := n.RunTool("create_note", []byte(`{"title":"Мышь полевая","content":"две"}`))
+	if err != nil || second.Status != "success" || second.File != "Мышь-полевая-2.md" || !second.NewFile {
+		t.Fatalf("second = %+v, err = %v", second, err)
+	}
+}
+
+func TestRunTool_createAppendsPermutedTitle(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("Мышь-полевая.md", "первая строка"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := n.RunTool("create_note", []byte(`{"title":"Полевая мышь","content":"она рыжая"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "success" || res.File != "Мышь-полевая.md" || res.NewFile {
+		t.Fatalf("res = %+v", res)
+	}
+
+	list, err := n.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	note, err := n.Get("Мышь-полевая.md")
+	if err != nil || !strings.Contains(note.Content, "первая строка") || !strings.Contains(note.Content, "она рыжая") {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+}
+
 func TestNotes_RevertChanges_restoreAndTrash(t *testing.T) {
 	n := openTest(t)
 	if _, err := n.Save("keep.md", "v1"); err != nil {

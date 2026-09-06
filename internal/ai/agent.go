@@ -56,6 +56,7 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 	if isVaultCountQuery(lastUserText(userMessages)) && len(attachments) == 0 {
 		return ChatResult{Content: a.vaultCount(scope), System: true}, nil
 	}
+	userMessages = lastUserTurn(userMessages)
 	messages := WithToolSystem(userMessages, a.scopeHint(scope))
 	if count := a.vaultCount(scope); count != "" {
 		messages = append(messages, Message{Role: RoleSystem, Content: count})
@@ -202,6 +203,17 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				switch name {
 				case "create_note":
 					notesChanged = true
+					if !result.NewFile {
+						if _, created := createdSet[result.File]; !created {
+							if _, seen := previous[result.File]; !seen {
+								previous[result.File] = result.Previous
+							}
+						}
+						updatedFiles = append(updatedFiles, result.File)
+						prev := result.Previous
+						emitProgress(progress, Phase{Kind: "updated", File: result.File, Title: result.Title, Previous: &prev})
+						break
+					}
 					createdFiles = append(createdFiles, result.File)
 					createdSet[result.File] = struct{}{}
 					emitProgress(progress, Phase{Kind: "created", File: result.File, Title: result.Title})

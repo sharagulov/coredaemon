@@ -115,6 +115,15 @@ func lastUserText(msgs []Message) string {
 	return ""
 }
 
+func lastUserTurn(msgs []Message) []Message {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleUser {
+			return []Message{msgs[i]}
+		}
+	}
+	return msgs
+}
+
 func (a *Agent) loadSearchContext(scope, query string) (string, []storage.SearchHit, bool) {
 	if !storage.Searchable(query) {
 		return "", nil, false

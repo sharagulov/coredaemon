@@ -216,3 +216,52 @@ func TestIsVaultCountQuery(t *testing.T) {
 		t.Fatal("not a count query")
 	}
 }
+
+func TestAgent_doesNotReplayEarlierWrites(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 && strings.Contains(string(body), "допиши в заметку про футбол") {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"create_note","arguments":{"title":"Камыш","content":"про камыш"}}},{"type":"function","function":{"name":"append_to_note","arguments":{"filename":"Футбол.md","content":"мяч квадратный"}}}]}}`))
+			return
+		}
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"create_note","arguments":{"title":"Камыш","content":"про камыш"}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"готово"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Футбол.md", "про мяч"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "допиши в заметку про футбол, что мяч квадратный"},
+		{Role: RoleSystem, Content: "Дополнено: Футбол.md"},
+		{Role: RoleUser, Content: "создай заметку о камыше"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "Создано: Камыш.md" || !result.System || len(result.Updated) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	list, err := notes.List()
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	football, err := notes.Get("Футбол.md")
+	if err != nil || football.Content != "про мяч" {
+		t.Fatalf("football = %+v, err = %v", football, err)
+	}
+}

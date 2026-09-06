@@ -190,6 +190,51 @@ func TestAgent_createsEveryNoteAcrossTurns(t *testing.T) {
 	}
 }
 
+func TestAgent_createNoteAppendsPermutedTitle(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"create_note","arguments":{"title":"Полевая мышь","content":"она рыжая"}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"готово"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Мышь-полевая.md", "первая строка"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "допиши в заметку про полевую мышь, что она рыжая"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "Дополнено: Мышь-полевая.md" || !result.System || len(result.Created) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(result.Updated) != 1 || result.Updated[0] != "Мышь-полевая.md" {
+		t.Fatalf("updated = %v", result.Updated)
+	}
+	list, err := notes.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	note, err := notes.Get("Мышь-полевая.md")
+	if err != nil || !strings.Contains(note.Content, "первая строка") || !strings.Contains(note.Content, "она рыжая") {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+}
+
 func TestAgent_createsEveryNoteInOneTurn(t *testing.T) {
 	step := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
