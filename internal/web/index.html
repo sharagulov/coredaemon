@@ -111,9 +111,20 @@
         </button>
         <h1 class="notes-header__title notes-toolbar__title">Заметки</h1>
       </div>
+      <button
+        type="button"
+        class="notes-bar notes-bar--short notes-header__chat-toggle"
+        aria-label="Свернуть чат"
+        aria-pressed="true"
+      >
+        <span class="notes-header__chat-icon" aria-hidden="true">
+          <img src="assets/icon-chevron.png" alt="">
+          <img src="assets/icon-chevron.png" alt="">
+        </span>
+      </button>
     </header>
 
-    <div class="notes-body">
+    <div class="notes-body is-chat-open">
       <aside class="notes-section" aria-label="Список заметок">
         <div class="notes-controls">
           <div class="notes-controls__left">
@@ -183,7 +194,7 @@
       </aside>
 
       <div
-        class="notes-splitter"
+        class="notes-splitter notes-splitter--list"
         role="separator"
         aria-orientation="vertical"
         aria-label="Изменить ширину панелей"
@@ -214,6 +225,16 @@
           </footer>
         </article>
       </section>
+
+      <div
+        class="notes-splitter notes-splitter--chat"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Изменить ширину чата"
+        tabindex="0"
+      ></div>
+
+      <section class="notes-chat" aria-label="AI-помощник"></section>
     </div>
   </div>
 

@@ -25,6 +25,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	api.MountNotes(mux, notes)
+	api.MountChats(mux, notes)
 	api.MountChat(mux, agent)
 	web.Mount(mux)
 

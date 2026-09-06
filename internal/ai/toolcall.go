@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -9,7 +10,19 @@ import (
 var (
 	toolCallBlock = regexp.MustCompile(`(?is)<tool_call>\s*(.*?)\s*</tool_call>`)
 	toolCallTag   = regexp.MustCompile(`(?i)</?tool_call>`)
+	toolCallOpen  = regexp.MustCompile(`(?i)<tool_call>`)
 )
+
+var textToolNames = map[string]bool{
+	"create_note":    true,
+	"append_to_note": true,
+	"read_note":      true,
+	"search_notes":   true,
+	"trash_note":     true,
+	"delete_note":    true,
+	"remove_note":    true,
+	"move_note":      true,
+}
 
 type textToolCall struct {
 	Name      string          `json:"name"`
@@ -32,42 +45,191 @@ func normalizeAssistant(msg Message) Message {
 		if seen[key] {
 			continue
 		}
+		seen[key] = true
 		msg.ToolCalls = append(msg.ToolCalls, c)
 	}
 	return msg
 }
 
 func parseTextToolCalls(content string) []ToolCall {
-	matches := toolCallBlock.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
+	if strings.TrimSpace(content) == "" {
 		return nil
 	}
 
-	out := make([]ToolCall, 0, len(matches))
-	for _, m := range matches {
-		body := strings.TrimSpace(m[1])
-		if body == "" {
+	var out []ToolCall
+	for _, m := range toolCallBlock.FindAllStringSubmatch(content, -1) {
+		out = append(out, parseToolCallBody(m[1])...)
+	}
+	if !toolCallBlock.MatchString(content) {
+		if loc := toolCallOpen.FindStringIndex(content); loc != nil {
+			body := toolCallTag.ReplaceAllString(content[loc[1]:], "")
+			out = append(out, parseToolCallBody(body)...)
+		}
+	}
+	out = append(out, extractJSONToolCalls(content)...)
+	return dedupeCalls(out)
+}
+
+func dedupeCalls(calls []ToolCall) []ToolCall {
+	if len(calls) < 2 {
+		return calls
+	}
+	seen := make(map[string]bool, len(calls))
+	out := make([]ToolCall, 0, len(calls))
+	for _, c := range calls {
+		key := c.Function.Name + "\n" + string(c.Function.Arguments)
+		if seen[key] {
 			continue
 		}
-		var raw textToolCall
-		if err := json.Unmarshal([]byte(body), &raw); err != nil || raw.Name == "" {
-			continue
-		}
-		out = append(out, ToolCall{
-			Type: "function",
-			Function: ToolCallFunction{
-				Name:      raw.Name,
-				Arguments: normalizeArgs(raw.Arguments),
-			},
-		})
+		seen[key] = true
+		out = append(out, c)
 	}
 	return out
+}
+
+func parseToolCallBody(body string) []ToolCall {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil
+	}
+	if calls := parseToolJSON([]byte(body)); len(calls) > 0 {
+		return calls
+	}
+
+	if i := strings.Index(body, "("); i > 0 && strings.HasSuffix(body, ")") {
+		name := strings.TrimSpace(body[:i])
+		if textToolNames[name] {
+			args := strings.TrimSpace(body[i+1 : len(body)-1])
+			return []ToolCall{makeTextCall(name, json.RawMessage(args))}
+		}
+	}
+
+	name, rest, ok := strings.Cut(body, "\n")
+	name = strings.TrimSpace(name)
+	rest = strings.TrimSpace(rest)
+	if ok && textToolNames[name] && strings.HasPrefix(rest, "{") {
+		return []ToolCall{makeTextCall(name, json.RawMessage(rest))}
+	}
+	return nil
+}
+
+func extractJSONToolCalls(s string) []ToolCall {
+	var out []ToolCall
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' && s[i] != '[' {
+			continue
+		}
+		raw, n := decodeJSONAt(s[i:])
+		if n == 0 {
+			continue
+		}
+		calls := parseToolJSON(raw)
+		if len(calls) > 0 {
+			out = append(out, calls...)
+			i += n - 1
+			continue
+		}
+	}
+	return out
+}
+
+func decodeJSONAt(s string) (json.RawMessage, int) {
+	dec := json.NewDecoder(strings.NewReader(s))
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return nil, 0
+	}
+	return raw, int(dec.InputOffset())
+}
+
+func parseToolJSON(raw json.RawMessage) []ToolCall {
+	raw = json.RawMessage(bytes.TrimSpace(raw))
+	if len(raw) == 0 {
+		return nil
+	}
+	if raw[0] == '[' {
+		var items []textToolCall
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil
+		}
+		out := make([]ToolCall, 0, len(items))
+		for _, item := range items {
+			if c, ok := textCall(item); ok {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	var item textToolCall
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return nil
+	}
+	if c, ok := textCall(item); ok {
+		return []ToolCall{c}
+	}
+	return nil
+}
+
+func textCall(item textToolCall) (ToolCall, bool) {
+	if !textToolNames[item.Name] {
+		return ToolCall{}, false
+	}
+	return makeTextCall(item.Name, item.Arguments), true
+}
+
+func makeTextCall(name string, args json.RawMessage) ToolCall {
+	return ToolCall{
+		Type: "function",
+		Function: ToolCallFunction{
+			Name:      name,
+			Arguments: normalizeArgs(args),
+		},
+	}
 }
 
 func stripToolMarkup(content string) string {
 	s := toolCallBlock.ReplaceAllString(content, "")
 	s = toolCallTag.ReplaceAllString(s, "")
+	s = stripJSONToolBlobs(s)
 	return strings.TrimSpace(s)
+}
+
+func stripJSONToolBlobs(s string) string {
+	var b strings.Builder
+	removed := false
+	for i := 0; i < len(s); {
+		if s[i] == '{' || s[i] == '[' {
+			raw, n := decodeJSONAt(s[i:])
+			if n > 0 && len(parseToolJSON(raw)) > 0 {
+				removed = true
+				i += n
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	out := strings.TrimSpace(b.String())
+	if !removed {
+		return out
+	}
+	return dropToolNoise(out)
+}
+
+func dropToolNoise(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "[]{}, \n\t\r")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.ContainsAny(s, ".!?") || strings.ContainsAny(s, " \n\t") {
+		return s
+	}
+	if len([]rune(s)) <= 12 {
+		return ""
+	}
+	return s
 }
 
 func normalizeArgs(raw json.RawMessage) json.RawMessage {

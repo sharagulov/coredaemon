@@ -31,7 +31,7 @@ func NoteTools() []Tool {
 						},
 						"content": map[string]any{
 							"type":        "string",
-							"description": "Full note body",
+							"description": "Note body only. Do not repeat the title as a markdown heading.",
 						},
 					},
 				},
@@ -79,14 +79,13 @@ func NoteTools() []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "search_notes",
-				Description: "Search all notes by keywords. Use before answering questions about existing notes.",
+				Description: "Search notes by keywords. Omit query (or pass empty) to list all notes and get the total in found.",
 				Parameters: map[string]any{
-					"type":     "object",
-					"required": []string{"query"},
+					"type": "object",
 					"properties": map[string]any{
 						"query": map[string]any{
 							"type":        "string",
-							"description": "Search words, e.g. рецепт пирога or четверг",
+							"description": "Search words, e.g. рецепт пирога. Empty or omit to list all notes.",
 						},
 					},
 				},

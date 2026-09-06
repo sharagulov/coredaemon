@@ -100,6 +100,14 @@ func TestSearch_tool(t *testing.T) {
 	if err != nil || empty.Status != "success" || empty.Found != 0 || len(empty.Hits) != 0 {
 		t.Fatalf("empty search = %+v, err = %v", empty, err)
 	}
+
+	listed, err := n.RunTool("search_notes", []byte(`{}`))
+	if err != nil || listed.Status != "success" || listed.Found != 1 || len(listed.Hits) != 1 {
+		t.Fatalf("list all = %+v, err = %v", listed, err)
+	}
+	if listed.Hits[0].File != "tea.md" {
+		t.Fatalf("listed file = %q", listed.Hits[0].File)
+	}
 }
 
 func TestFtsQuery(t *testing.T) {

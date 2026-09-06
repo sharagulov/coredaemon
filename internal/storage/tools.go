@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +37,7 @@ func (n *Notes) CreateNote(title, content string) (*Note, error) {
 	if err != nil {
 		return nil, err
 	}
-	return n.Save(name, withHeading(title, content))
+	return n.Save(name, stripTitleHeading(title, content))
 }
 
 // AppendToNote appends content to an existing note.
@@ -114,10 +115,16 @@ func (n *Notes) RunTool(toolName string, args json.RawMessage) (ToolResult, erro
 		var p struct {
 			Query string `json:"query"`
 		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{Status: "error", Error: "invalid arguments"}, nil
+		if len(bytes.TrimSpace(args)) > 0 {
+			if err := json.Unmarshal(args, &p); err != nil {
+				return ToolResult{Status: "error", Error: "invalid arguments"}, nil
+			}
 		}
-		hits, err := n.Search(p.Query)
+		query := strings.TrimSpace(p.Query)
+		if query == "" || query == "*" {
+			return n.listNotesTool(searchHitLimit)
+		}
+		hits, err := n.Search(query)
 		if err != nil {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
@@ -132,6 +139,25 @@ func (n *Notes) RunTool(toolName string, args json.RawMessage) (ToolResult, erro
 	default:
 		return ToolResult{Status: "error", Error: "unknown tool"}, nil
 	}
+}
+
+func (n *Notes) listNotesTool(limit int) (ToolResult, error) {
+	list, err := n.List()
+	if err != nil {
+		return ToolResult{Status: "error", Error: err.Error()}, nil
+	}
+	hits := make([]SearchHit, 0, min(limit, len(list)))
+	for i, note := range list {
+		if i >= limit {
+			break
+		}
+		hits = append(hits, SearchHit{
+			File:    note.Name,
+			Title:   note.Title,
+			Snippet: note.Preview,
+		})
+	}
+	return ToolResult{Status: "success", Hits: hits, Found: len(list)}, nil
 }
 
 func (n *Notes) uniqueName(slug string) (string, error) {
@@ -170,15 +196,35 @@ func cleanTitle(title string) string {
 	return capitalizeFirst(title)
 }
 
-func withHeading(title, content string) string {
-	if headingTitle(content) != "" {
-		return content
+func stripTitleHeading(title, content string) string {
+	body := strings.TrimLeft(content, "\n\r")
+	if !sameNoteTitle(headingTitle(body), title) {
+		return body
 	}
-	body := strings.TrimLeft(content, "\n")
-	if strings.TrimSpace(body) == "" {
-		return "# " + title + "\n"
+	for {
+		line, rest, found := strings.Cut(body, "\n")
+		if strings.TrimSpace(line) == "" {
+			if !found {
+				return ""
+			}
+			body = rest
+			continue
+		}
+		if found {
+			return strings.TrimLeft(rest, "\n\r")
+		}
+		return ""
 	}
-	return "# " + title + "\n\n" + body
+}
+
+func sameNoteTitle(a, b string) bool {
+	return titleKey(a) != "" && titleKey(a) == titleKey(b)
+}
+
+func titleKey(s string) string {
+	s = strings.ReplaceAll(s, "-", " ")
+	s = strings.ReplaceAll(s, "_", " ")
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
 func slugFromTitle(title string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/core-daemon/core-daemon/internal/storage"
@@ -74,6 +75,44 @@ func TestAgent_toolLoop(t *testing.T) {
 	}
 	if len(result.Created) != 1 || result.Created[0] != list[0].Name {
 		t.Fatalf("created = %v, file = %q", result.Created, list[0].Name)
+	}
+}
+
+func TestAgent_textToolCallCreatesNote(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"ronics\n\n{\"name\": \"create_note\", \"arguments\": {\"title\": \"Мерседес\", \"content\": \"рассказ\"}}\n]"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Создал заметку"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "создай заметку про мерседес"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.NotesChanged || len(result.Created) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if strings.Contains(result.Content, "create_note") || strings.Contains(result.Content, "ronics") {
+		t.Fatalf("leaked tool text: %q", result.Content)
+	}
+	list, err := notes.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %+v, err = %v", list, err)
 	}
 }
 

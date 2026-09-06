@@ -8,3 +8,4 @@ export { createContextMenu, createSubmenuRow, createContextAction } from "./cont
 export { registerPopupDismiss } from "./popups.js";
 export { renderMarkdown } from "./markdown.js";
 export { createMarkdownEditor } from "./markdown-editor.js";
+export { createNotesChat } from "./notes-chat.js";

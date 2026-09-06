@@ -16,8 +16,8 @@ func TestNotes_CreateAppendReadTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(created.Content, "# Tasks\n") {
-		t.Fatalf("expected heading, got %q", created.Content)
+	if created.Content != "- buy milk" {
+		t.Fatalf("content = %q", created.Content)
 	}
 
 	list, err := n.List()
@@ -29,8 +29,8 @@ func TestNotes_CreateAppendReadTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(cactus.Content, "# Яблоко\n") {
-		t.Fatalf("capitalized heading = %q", cactus.Content)
+	if cactus.Content != "фрукт" {
+		t.Fatalf("content = %q", cactus.Content)
 	}
 
 	res, err := n.RunTool("read_note", []byte(`{"filename":"`+created.Name+`"}`))
@@ -49,6 +49,26 @@ func TestNotes_CreateAppendReadTool(t *testing.T) {
 	}
 	if !strings.Contains(got.Content, "call mom") {
 		t.Fatalf("content = %q", got.Content)
+	}
+}
+
+func TestCreateNote_stripsDuplicateTitle(t *testing.T) {
+	n := openTest(t)
+
+	note, err := n.CreateNote("Новая заметка", "# Новая заметка\n\nТекст текст текст")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note.Content != "Текст текст текст" {
+		t.Fatalf("content = %q", note.Content)
+	}
+
+	kept, err := n.CreateNote("Проект", "# Задачи\n\nсделать")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.Content != "# Задачи\n\nсделать" {
+		t.Fatalf("kept other heading = %q", kept.Content)
 	}
 }
 

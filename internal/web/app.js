@@ -11,7 +11,7 @@ import {
   createContextAction,
   registerPopupDismiss,
   createMarkdownEditor,
-  renderMarkdown,
+  createNotesChat,
 } from "./ui/index.js";
 
 const FILTER_STORAGE_KEY = "notes-filter";
@@ -29,9 +29,6 @@ const FILTER_STORAGE_KEY = "notes-filter";
     searchSnippets: {},
     active: null,
     activeTrash: null,
-    chat: [],
-    sending: false,
-    pending: false,
   };
 
   const els = {
@@ -56,13 +53,8 @@ const FILTER_STORAGE_KEY = "notes-filter";
     editorTitle: document.querySelector(".notes-editor__title"),
     ctxRoot: document.querySelector(".notes-ctx"),
     ctxMenu: document.querySelector(".notes-ctx__menu"),
-    // Legacy (mummified — preserved for future Cloud section)
     list: document.querySelector(".sidebar__list"),
     label: document.querySelector(".sidebar__label"),
-    messages: document.querySelector(".chat__messages"),
-    chatForm: document.querySelector(".chat__input"),
-    chatInput: document.querySelector(".chat__input textarea"),
-    chatSubmit: document.querySelector(".chat__input button"),
   };
 
   function noteLabel(name) {
@@ -478,82 +470,6 @@ const FILTER_STORAGE_KEY = "notes-filter";
     return mod ? relativeTimeLabel(mod) : "";
   }
 
-  function nextSSEBlock(buffer) {
-    const lf = buffer.indexOf("\n\n");
-    const crlf = buffer.indexOf("\r\n\r\n");
-    if (lf === -1 && crlf === -1) return null;
-    if (crlf !== -1 && (lf === -1 || crlf < lf)) {
-      return { block: buffer.slice(0, crlf), rest: buffer.slice(crlf + 4) };
-    }
-    return { block: buffer.slice(0, lf), rest: buffer.slice(lf + 2) };
-  }
-
-  function parseSSEBlock(block) {
-    let event = "message";
-    let data = "";
-    for (const raw of block.split(/\r?\n/)) {
-      const line = raw.trimEnd();
-      if (!line || line.startsWith(":")) continue;
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) data += line.slice(5).trim();
-    }
-    if (!data) return null;
-    return { event, data: JSON.parse(data) };
-  }
-
-  async function readChatStream(res, onEvent) {
-    if (!res.ok) {
-      let message = res.statusText;
-      try {
-        const body = await res.json();
-        if (body.error) message = body.error;
-      } catch {
-        // ignore
-      }
-      throw new Error(message);
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let part;
-      while ((part = nextSSEBlock(buffer))) {
-        buffer = part.rest;
-        const evt = parseSSEBlock(part.block);
-        if (!evt) continue;
-
-        if (evt.event === "status") {
-          onEvent(evt.data);
-        } else if (evt.event === "done") {
-          return evt.data;
-        } else if (evt.event === "error") {
-          throw new Error(evt.data.error || "ollama unavailable");
-        }
-      }
-    }
-
-    throw new Error("stream ended without result");
-  }
-
-  async function chatStream(messages, onEvent) {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-      },
-      cache: "no-store",
-      body: JSON.stringify({ messages }),
-    });
-    return readChatStream(res, onEvent);
-  }
-
   function upsertNote(file, title) {
     if (!file) return;
     const i = state.notes.findIndex((n) => n.name === file);
@@ -966,6 +882,8 @@ const FILTER_STORAGE_KEY = "notes-filter";
       { rootSelector: ".notes-sort", close: closeSortMenu },
       { rootSelector: ".notes-filter", close: closeFilterMenu },
       { rootSelector: ".notes-ctx", close: closeContextMenu },
+      { rootSelector: ".notes-chat__title-wrap", close: notesChat.closeMenus },
+      { rootSelector: ".notes-chat__attach-wrap", close: notesChat.closeMenus },
     ]);
   }
 
@@ -1060,193 +978,20 @@ const FILTER_STORAGE_KEY = "notes-filter";
     els.bento.appendChild(item);
   }
 
-  /* Legacy chat — preserved for future Cloud section */
-
-  function appendSearchFacts(facts, matches) {
-    const group = document.createElement("div");
-    group.className = "facts__group";
-
-    const label = document.createElement("div");
-    label.className = "facts__label facts__label--found";
-    if (!matches.length) {
-      label.textContent = "Ничего не найдено";
-      group.appendChild(label);
-      facts.appendChild(group);
-      return;
-    }
-
-    label.textContent = `Найдено · ${matches.length}`;
-    group.appendChild(label);
-
-    const chips = document.createElement("div");
-    chips.className = "facts__chips";
-    for (const hit of matches) {
-      const chip = document.createElement("span");
-      chip.className = "facts__chip";
-      chip.textContent = hit.title || noteLabel(hit.file);
-      chip.title = hit.file;
-      chips.appendChild(chip);
-    }
-    group.appendChild(chips);
-    facts.appendChild(group);
-  }
-
-  function createFactsGroup(kind, files) {
-    if (!files?.length) return null;
-
-    const group = document.createElement("div");
-    group.className = "facts__group";
-
-    const label = document.createElement("div");
-    label.className = `facts__label facts__label--${kind}`;
-    const labels = { created: "Создано", updated: "Обновлено" };
-    label.textContent = `${labels[kind] || kind} · ${files.length}`;
-    group.appendChild(label);
-
-    const chips = document.createElement("div");
-    chips.className = "facts__chips";
-    for (const file of files) {
-      const chip = document.createElement("span");
-      chip.className = "facts__chip";
-      chip.textContent = noteLabel(file);
-      chip.title = file;
-      chips.appendChild(chip);
-    }
-    group.appendChild(chips);
-
-    return group;
-  }
-
-  function createAssistantMessage(msg) {
-    const wrap = document.createElement("article");
-    wrap.className = "message message--assistant message--enter";
-
-    const content = document.createElement("div");
-    content.className = "message__content";
-    renderMarkdown(content, msg.content || "");
-    wrap.appendChild(content);
-
-    if (msg.created?.length || msg.updated?.length || msg.searched) {
-      const facts = document.createElement("div");
-      facts.className = "message__facts message__facts--enter";
-
-      const header = document.createElement("div");
-      header.className = "facts__header";
-      header.textContent = "На диске";
-      facts.appendChild(header);
-
-      if (msg.searched) {
-        appendSearchFacts(facts, msg.matches || []);
+  const notesChat = createNotesChat({
+    root: document.querySelector(".notes-chat"),
+    toggle: document.querySelector(".notes-header__chat-toggle"),
+    body: document.querySelector(".notes-body"),
+    listNotes: () => state.notes,
+    noteLabel,
+    onNoteEvent: (phase) => {
+      if ((phase.kind === "created" || phase.kind === "updated") && phase.file) {
+        upsertNote(phase.file, phase.title);
       }
-      const created = createFactsGroup("created", msg.created);
-      if (created) facts.appendChild(created);
-      const updated = createFactsGroup("updated", msg.updated);
-      if (updated) facts.appendChild(updated);
-
-      wrap.appendChild(facts);
-    }
-
-    return wrap;
-  }
-
-  function createPendingMessage() {
-    const wrap = document.createElement("article");
-    wrap.className = "message message--pending message--enter";
-    wrap.setAttribute("aria-live", "polite");
-    wrap.setAttribute("aria-label", "Думаю");
-
-    const indicator = document.createElement("div");
-    indicator.className = "typing-indicator";
-    indicator.setAttribute("aria-hidden", "true");
-    for (let i = 0; i < 3; i++) {
-      indicator.appendChild(document.createElement("span"));
-    }
-    wrap.appendChild(indicator);
-
-    const label = document.createElement("span");
-    label.className = "message__pending-text";
-    label.textContent = "Думаю";
-    wrap.appendChild(label);
-
-    return wrap;
-  }
-
-  function renderChat() {
-    if (!els.messages) return;
-    els.messages.innerHTML = "";
-
-    if (state.chat.length === 0 && !state.pending) {
-      const hint = document.createElement("p");
-      hint.className = "chat__hint";
-      hint.textContent = "Напишите сообщение — AI может создавать и редактировать заметки";
-      els.messages.appendChild(hint);
-      return;
-    }
-
-    for (const msg of state.chat) {
-      if (msg.role === "assistant") {
-        els.messages.appendChild(createAssistantMessage(msg));
-        continue;
-      }
-
-      const el = document.createElement("p");
-      el.className = `message message--${msg.role} message--enter`;
-      el.textContent = msg.content;
-      els.messages.appendChild(el);
-    }
-
-    if (state.pending) {
-      els.messages.appendChild(createPendingMessage());
-    }
-
-    els.messages.scrollTop = els.messages.scrollHeight;
-  }
-
-  function chatHistory() {
-    return state.chat.filter((m) => m.role === "user" || m.role === "assistant");
-  }
-
-  async function sendMessage(text) {
-    if (state.sending) return;
-
-    state.sending = true;
-    state.pending = true;
-    els.chatInput.disabled = true;
-    els.chatSubmit.disabled = true;
-
-    state.chat.push({ role: "user", content: text });
-    renderChat();
-
-    try {
-      const res = await chatStream(chatHistory(), (phase) => {
-        if ((phase.kind === "created" || phase.kind === "updated") && phase.file) {
-          upsertNote(phase.file, phase.title);
-        }
-      });
-
-      state.chat.push({
-        role: "assistant",
-        content: res.content,
-        created: res.created || [],
-        updated: res.updated || [],
-        searched: !!res.searched,
-        matches: res.matches || [],
-      });
-
-      if (res.notes_changed) {
-        await loadNotes();
-      }
-    } catch (err) {
-      state.chat.push({ role: "error", content: err.message });
-    } finally {
-      state.sending = false;
-      state.pending = false;
-      els.chatInput.disabled = false;
-      els.chatSubmit.disabled = false;
-      renderChat();
-      els.chatInput.focus();
-    }
-  }
+    },
+    onNotesReload: () => loadNotes().catch(showError),
+    onOpenNote: (name) => selectNote(name),
+  });
 
   /* Events */
 
@@ -1298,99 +1043,118 @@ const FILTER_STORAGE_KEY = "notes-filter";
     });
   }
 
-  if (els.chatForm) {
-    els.chatForm.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const text = els.chatInput.value.trim();
-      if (!text || state.sending) return;
-      els.chatInput.value = "";
-      sendMessage(text);
-    });
-  }
-
-  if (els.chatInput) {
-    els.chatInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        els.chatForm.requestSubmit();
-      }
-    });
-  }
-
-  (function initNotesSplit() {
+  (function initNotesSplits() {
     const body = document.querySelector(".notes-body");
-    const splitter = document.querySelector(".notes-splitter");
-    if (!body || !splitter) return;
+    const listSplitter = document.querySelector(".notes-splitter--list");
+    const chatSplitter = document.querySelector(".notes-splitter--chat");
+    if (!body || !listSplitter) return;
 
-    const STORAGE_KEY = "notes-split-width";
+    const LIST_KEY = "notes-split-width";
+    const CHAT_KEY = "notes-chat-width";
     const MIN = 320;
     const SPLITTER = 6;
-    let dragging = false;
+    let dragging = null;
 
     function splitEnabled() {
       return window.matchMedia("(min-width: 1101px)").matches;
     }
 
-    function clamp(width) {
-      const max = Math.max(MIN, body.clientWidth - MIN - SPLITTER);
+    function chatOpen() {
+      return body.classList.contains("is-chat-open");
+    }
+
+    function readVar(name, fallback) {
+      const n = parseInt(getComputedStyle(body).getPropertyValue(name).trim(), 10);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function listWidth() {
+      return readVar("--notes-split", 780);
+    }
+
+    function chatWidth() {
+      return chatOpen() ? readVar("--notes-chat-split", 507) : 0;
+    }
+
+    function clampList(width) {
+      const reserved = (chatOpen() ? Math.max(MIN, chatWidth()) : 0) + (chatOpen() ? SPLITTER * 2 : SPLITTER) + MIN;
+      const max = Math.max(MIN, body.clientWidth - reserved);
       return Math.min(Math.max(width, MIN), max);
     }
 
-    function currentWidth() {
-      const raw = getComputedStyle(body).getPropertyValue("--notes-split").trim();
-      const n = parseInt(raw, 10);
-      return Number.isFinite(n) ? n : 1000;
+    function clampChat(width) {
+      const reserved = Math.max(MIN, listWidth()) + SPLITTER * 2 + MIN;
+      const max = Math.max(MIN, body.clientWidth - reserved);
+      return Math.min(Math.max(width, MIN), max);
     }
 
-    function setWidth(px) {
-      body.style.setProperty("--notes-split", `${clamp(px)}px`);
-      localStorage.setItem(STORAGE_KEY, String(clamp(px)));
+    function setList(px) {
+      const v = clampList(px);
+      body.style.setProperty("--notes-split", `${v}px`);
+      localStorage.setItem(LIST_KEY, String(v));
     }
 
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const n = parseInt(saved, 10);
-      if (Number.isFinite(n)) setWidth(n);
+    function setChat(px) {
+      const v = clampChat(px);
+      body.style.setProperty("--notes-chat-split", `${v}px`);
+      localStorage.setItem(CHAT_KEY, String(v));
+    }
+
+    function applySaved() {
+      const savedList = parseInt(localStorage.getItem(LIST_KEY), 10);
+      if (Number.isFinite(savedList)) setList(savedList);
+      else setList(listWidth());
+      const savedChat = parseInt(localStorage.getItem(CHAT_KEY), 10);
+      if (chatOpen()) {
+        if (Number.isFinite(savedChat)) setChat(savedChat);
+        else setChat(chatWidth());
+      }
     }
 
     function stopDrag() {
       if (!dragging) return;
-      dragging = false;
-      splitter.classList.remove("is-dragging");
+      dragging.el.classList.remove("is-dragging");
+      dragging = null;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     }
 
-    splitter.addEventListener("mousedown", (e) => {
-      if (!splitEnabled()) return;
-      e.preventDefault();
-      dragging = true;
-      splitter.classList.add("is-dragging");
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-    });
+    function bindDrag(el, onMove) {
+      if (!el) return;
+      el.addEventListener("mousedown", (e) => {
+        if (!splitEnabled()) return;
+        e.preventDefault();
+        dragging = { el, onMove };
+        el.classList.add("is-dragging");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+      });
+      el.addEventListener("keydown", (e) => {
+        if (!splitEnabled()) return;
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        const step = e.shiftKey ? 48 : 16;
+        const dir = e.key === "ArrowRight" ? step : -step;
+        if (el === listSplitter) setList(listWidth() + dir);
+        else setChat(chatWidth() - dir);
+      });
+    }
+
+    bindDrag(listSplitter, (e, rect) => setList(e.clientX - rect.left));
+    bindDrag(chatSplitter, (e, rect) => setChat(rect.right - e.clientX));
 
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
-      const rect = body.getBoundingClientRect();
-      setWidth(e.clientX - rect.left);
+      dragging.onMove(e, body.getBoundingClientRect());
     });
-
     window.addEventListener("mouseup", stopDrag);
     window.addEventListener("blur", stopDrag);
-
-    splitter.addEventListener("keydown", (e) => {
-      if (!splitEnabled()) return;
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-      e.preventDefault();
-      const step = e.shiftKey ? 48 : 16;
-      setWidth(currentWidth() + (e.key === "ArrowRight" ? step : -step));
-    });
-
     window.addEventListener("resize", () => {
-      if (splitEnabled()) setWidth(currentWidth());
+      if (splitEnabled()) applySaved();
     });
+    body.addEventListener("notes-chat-toggle", applySaved);
+
+    applySaved();
   })();
 
-  renderChat();
   if (notesRoute()) applyScreen("notes");
