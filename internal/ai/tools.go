@@ -91,43 +91,5 @@ func NoteTools() []Tool {
 				},
 			},
 		},
-		{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        "delete_note",
-				Description: "Delete a .md note file from disk",
-				Parameters: map[string]any{
-					"type":     "object",
-					"required": []string{"filename"},
-					"properties": map[string]any{
-						"filename": map[string]any{
-							"type":        "string",
-							"description": "Note file name, e.g. tasks.md",
-						},
-					},
-				},
-			},
-		},
-		{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        "move_note",
-				Description: "Move or rename a .md note file",
-				Parameters: map[string]any{
-					"type":     "object",
-					"required": []string{"filename", "destination"},
-					"properties": map[string]any{
-						"filename": map[string]any{
-							"type":        "string",
-							"description": "Existing note file name, e.g. tasks.md",
-						},
-						"destination": map[string]any{
-							"type":        "string",
-							"description": "New path or file name, e.g. archive/tasks.md",
-						},
-					},
-				},
-			},
-		},
 	}
 }

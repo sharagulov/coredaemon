@@ -1,6 +1,10 @@
 package ai
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/core-daemon/core-daemon/internal/storage"
+)
 
 func TestParseTextToolCalls_bareJSON(t *testing.T) {
 	content := "ronics\n\n{\"name\": \"create_note\", \"arguments\": {\"title\": \"Мерседес, БМВ и Ауда\", \"content\": \"рассказ\"}}\n\n]"
@@ -68,11 +72,18 @@ func TestNormalizeAssistant_mergesTextCalls(t *testing.T) {
 }
 
 func TestGroundedContent(t *testing.T) {
-	got := groundedContent("выдумал три заметки", true, nil, false)
+	got := groundedContent("выдумал три заметки", true, nil, false, false)
 	if got != EmptySearchReply {
 		t.Fatalf("got %q", got)
 	}
-	if groundedContent("ok", false, nil, false) != "ok" {
+	if groundedContent("ok", false, nil, false, false) != "ok" {
 		t.Fatal("passthrough")
+	}
+	if groundedContent("Заметка удалена", false, nil, false, true) != storage.BlockedMutationMsg {
+		t.Fatal("blocked should replace invented success")
+	}
+	hits := []storage.SearchHit{{File: "dog.md"}}
+	if groundedContent("выдумал десять", true, hits, false, false) != "Найдено: 1\n• dog.md" {
+		t.Fatal("search hits should replace model text")
 	}
 }

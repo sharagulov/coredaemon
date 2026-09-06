@@ -16,10 +16,14 @@ const (
 		"О создании или изменении говори только при status success. " +
 		"Каждая заметка — отдельный вызов create_note. В content пиши только тело заметки. " +
 		"Сначала вызови инструменты через tool calling API, затем дай итог в 1–2 предложениях. " +
-		"status error — кратко передай текст ошибки."
+		"При status error строго транслируй текст error пользователю. " +
+		"Успешное выполнение — только если инструмент вернул status success."
 
 	// AnswerNudge is sent as a system message when tools ran but the model returned no text.
-	AnswerNudge = "Инструменты успешно отработали. Сформулируй финальный ответ для пользователя."
+	AnswerNudge = "Инструменты отработали. Сформулируй финальный ответ для пользователя по их результатам."
+
+	// ErrorNudge is sent when tools returned errors and the model gave no text.
+	ErrorNudge = "Инструменты вернули status error. Передай пользователю поле error без изменений."
 
 	// EmptySearchReply replaces the model text after a successful empty search.
 	EmptySearchReply = "Ничего не найдено."

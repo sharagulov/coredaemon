@@ -840,6 +840,13 @@ const FILTER_STORAGE_KEY = "notes-filter";
     dismissOtherPopups("ctx");
     const note = state.notes.find((n) => n.name === noteName);
     contextMenu.openAt(e, (menu) => {
+      menu.appendChild(createContextAction({
+        label: "Добавить в чат",
+        onClick: () => {
+          closeContextMenu();
+          notesChat.attachNote(noteName);
+        },
+      }));
       menu.appendChild(createSubmenuRow({
         label: "Переместить",
         items: sectionMoveTargets().map((t) => ({

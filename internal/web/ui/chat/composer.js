@@ -41,7 +41,15 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
     role: "listbox",
     "aria-label": "Заметки",
   });
+  const attachSearch = el("input", "notes-chat__attach-search", {
+    type: "search",
+    placeholder: "Поиск",
+    autocomplete: "off",
+    "aria-label": "Поиск заметок",
+  });
+  const attachList = el("div", "notes-chat__attach-list");
   attachMenu.hidden = true;
+  attachMenu.append(attachSearch, attachList);
   attachWrap.append(attachBtn, attachMenu);
 
   const chipsEl = el("div", "notes-chat__chips");
@@ -95,14 +103,39 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
     }
   }
 
+  function attach(item) {
+    const kind = String(item?.kind || "");
+    const path = String(item?.path || "");
+    if (!kind || !path) return;
+    if (attachments.some((a) => a.kind === kind && a.path === path)) return;
+    attachments.push({
+      kind,
+      path,
+      label: item.label || (kind === "folder" ? folderLabel(path) : fileLabel(path)),
+    });
+    renderChips();
+  }
+
   function renderAttachList() {
-    renderAttachMenu(attachMenu, {
+    renderAttachMenu(attachList, {
       notes: listNotes() || [],
       taken: new Set(attachments.map((a) => `${a.kind}:${a.path}`)),
       expanded: attachExpanded,
       noteLabel,
+      query: attachSearch.value,
     });
   }
+
+  attachSearch.addEventListener("click", (e) => e.stopPropagation());
+  attachSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.preventDefault();
+    e.stopPropagation();
+  });
+  attachSearch.addEventListener("input", () => {
+    attachExpanded.clear();
+    renderAttachList();
+    fitAttachMenu();
+  });
 
   attachMenu.addEventListener("click", (e) => {
     const toggle = e.target.closest(".notes-chat__attach-toggle");
@@ -123,22 +156,17 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
     dataKey: "value",
     onSelect: (value) => {
       const i = value.indexOf(":");
-      const kind = value.slice(0, i);
-      const path = value.slice(i + 1);
-      if (!kind || !path) return;
-      if (attachments.some((a) => a.kind === kind && a.path === path)) return;
-      attachments.push({
-        kind,
-        path,
-        label: kind === "folder" ? folderLabel(path) : fileLabel(path),
-      });
-      renderChips();
+      attach({ kind: value.slice(0, i), path: value.slice(i + 1) });
       dropdown.close();
     },
     onOpen: () => {
       attachExpanded.clear();
+      attachSearch.value = "";
       renderAttachList();
-      queueMicrotask(fitAttachMenu);
+      queueMicrotask(() => {
+        fitAttachMenu();
+        attachSearch.focus();
+      });
     },
     onClose: clearAttachMenuPos,
     rootSelector: ".notes-chat__attach-wrap",
@@ -189,6 +217,7 @@ export function createChatComposer({ listNotes, noteLabel, onSubmit, onStop }) {
       sendBtn.replaceChildren(generating ? stopIcon : sendIcon);
     },
     closeMenu: dropdown.close,
+    attach,
     setDraft(text, items = []) {
       textarea.value = text || "";
       attachments = (items || []).map((a) => ({ ...a }));

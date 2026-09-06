@@ -5,8 +5,13 @@ import {
   createBotPending,
   createChatComposer,
   createChatHeader,
+  createSystemMessage,
   createUserMessage,
 } from "./chat/index.js";
+
+function isSystemMessage(msg) {
+  return !!msg?.system;
+}
 
 const CHATS_KEY = "notes-chats-v1";
 const OPEN_KEY = "notes-chat-open";
@@ -200,7 +205,7 @@ export function createNotesChat({
   onNotesReload,
   onOpenNote,
 }) {
-  if (!root) return { closeMenus() {}, isOpen() { return false; } };
+  if (!root) return { closeMenus() {}, isOpen() { return false; }, attachNote() {} };
 
   const store = emptyStore();
   let ready = false;
@@ -292,6 +297,13 @@ export function createNotesChat({
     composer.closeMenu();
   }
 
+  function attachNote(name) {
+    if (!name) return;
+    composer.attach({ kind: "file", path: name });
+    setOpen(true);
+    composer.focus();
+  }
+
   function history() {
     return activeChat().messages
       .filter((m) => m.role === "user" || m.role === "assistant")
@@ -326,16 +338,23 @@ export function createNotesChat({
       }
       if (!turn) turn = el("div", "notes-chat__turn");
       if (msg.role === "assistant") {
-        turn.appendChild(createBotMessage({
-          content: msg.content,
-          thoughtSec: msg.thoughtSec,
-          at: msg.at,
-          created: msg.created,
-          updated: msg.updated,
-          searched: msg.searched,
-          matches: msg.matches,
-          onOpenNote,
-        }));
+        if (isSystemMessage(msg)) {
+          turn.appendChild(createSystemMessage({
+            content: msg.content,
+            at: msg.at,
+          }));
+        } else {
+          turn.appendChild(createBotMessage({
+            content: msg.content,
+            thoughtSec: msg.thoughtSec,
+            at: msg.at,
+            created: msg.created,
+            updated: msg.updated,
+            searched: msg.searched,
+            matches: msg.matches,
+            onOpenNote,
+          }));
+        }
       }
       if (msg.role === "error") {
         turn.appendChild(createBotError(msg.content));
@@ -444,6 +463,7 @@ export function createNotesChat({
         role: "assistant",
         content: res.content,
         at: Date.now(),
+        system: !!res.system,
         created: res.created || turnUndo.created,
         updated: res.updated || [],
         previous: res.previous || turnUndo.previous,
@@ -490,5 +510,5 @@ export function createNotesChat({
     if (!sending) setBusy(false);
   });
 
-  return { closeMenus, isOpen, setOpen };
+  return { closeMenus, isOpen, setOpen, attachNote };
 }

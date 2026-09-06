@@ -47,6 +47,7 @@ type ChatResult struct {
 	Previous     map[string]string   `json:"previous,omitempty"`
 	Searched     bool                `json:"searched,omitempty"`
 	Matches      []storage.SearchHit `json:"matches,omitempty"`
+	System       bool                `json:"system,omitempty"`
 }
 
 // Chat runs the event loop: model → tool calls → storage → model → final text.
@@ -56,6 +57,8 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 	notesChanged := false
 	nudged := false
 	searched := false
+	blockedHit := false
+	toolFailed := false
 	var createdFiles, updatedFiles []string
 	createdSet := map[string]struct{}{}
 	previous := map[string]string{}
@@ -71,25 +74,34 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			return ChatResult{}, err
 		}
 		msg = normalizeAssistant(msg)
+		if names := toolCallNames(msg.ToolCalls); len(names) > 0 {
+			log.Printf("agent: tool_calls %s", strings.Join(names, ", "))
+		}
 
 		if len(msg.ToolCalls) == 0 {
 			content := strings.TrimSpace(msg.Content)
 			if content == "" && !nudged {
 				nudged = true
-				messages = append(messages, Message{Role: RoleSystem, Content: AnswerNudge})
+				nudge := AnswerNudge
+				if toolFailed {
+					nudge = ErrorNudge
+				}
+				messages = append(messages, Message{Role: RoleSystem, Content: nudge})
 				continue
 			}
 			if content == "" {
 				return ChatResult{}, errors.New("empty response from ollama")
 			}
+			out := groundedContent(content, searched, matches, notesChanged, blockedHit)
 			return ChatResult{
-				Content:      groundedContent(content, searched, matches, notesChanged),
+				Content:      out,
 				NotesChanged: notesChanged,
 				Created:      createdFiles,
 				Updated:      updatedFiles,
 				Previous:     previousOrNil(previous),
 				Searched:     searched,
 				Matches:      matches,
+				System:       isSystemReply(out),
 			}, nil
 		}
 
@@ -105,17 +117,18 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			}
 			name := call.Function.Name
 			if blockedTools[name] {
-				messages = append(messages, toolMessage(name, storage.ToolResult{
-					Status: "error",
-					Error:  storage.BlockedMutationMsg,
-				}))
+				blockedHit = true
+				toolFailed = true
+				result := storage.ToolResult{Status: "error", Error: storage.BlockedMutationMsg}
+				logToolResult(name, result)
+				messages = append(messages, toolMessage(name, result))
 				continue
 			}
 			if !allowedTools[name] {
-				messages = append(messages, toolMessage(name, storage.ToolResult{
-					Status: "error",
-					Error:  "tool not allowed",
-				}))
+				toolFailed = true
+				result := storage.ToolResult{Status: "error", Error: "tool not allowed"}
+				logToolResult(name, result)
+				messages = append(messages, toolMessage(name, result))
 				continue
 			}
 
@@ -123,7 +136,10 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			if err != nil {
 				return ChatResult{}, err
 			}
-			log.Printf("agent: %s -> %s", name, result.Status)
+			if result.Status != "success" {
+				toolFailed = true
+			}
+			logToolResult(name, result)
 			if name == "search_notes" && result.Status == "success" {
 				searched = true
 				matches = result.Hits
@@ -170,11 +186,47 @@ func previousOrNil(previous map[string]string) map[string]string {
 	return previous
 }
 
-func groundedContent(content string, searched bool, matches []storage.SearchHit, notesChanged bool) string {
-	if searched && len(matches) == 0 && !notesChanged {
-		return EmptySearchReply
+func isSystemReply(s string) bool {
+	return s == storage.BlockedMutationMsg || s == EmptySearchReply
+}
+
+func groundedContent(content string, searched bool, matches []storage.SearchHit, notesChanged, blocked bool) string {
+	if blocked {
+		return storage.BlockedMutationMsg
+	}
+	if searched && !notesChanged {
+		if len(matches) == 0 {
+			return EmptySearchReply
+		}
+		return formatSearchHits(matches)
 	}
 	return content
+}
+
+func formatSearchHits(hits []storage.SearchHit) string {
+	var b strings.Builder
+	b.WriteString("Найдено: ")
+	b.WriteString(fmt.Sprintf("%d", len(hits)))
+	for _, h := range hits {
+		b.WriteString("\n• ")
+		b.WriteString(h.File)
+	}
+	return b.String()
+}
+
+func toolCallNames(calls []ToolCall) []string {
+	out := make([]string, 0, len(calls))
+	for _, c := range calls {
+		if c.Function.Name != "" {
+			out = append(out, c.Function.Name)
+		}
+	}
+	return out
+}
+
+func logToolResult(name string, result storage.ToolResult) {
+	body, _ := json.Marshal(result)
+	log.Printf("agent: %s -> %s", name, body)
 }
 
 func toolMessage(name string, result storage.ToolResult) Message {

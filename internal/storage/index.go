@@ -144,11 +144,18 @@ func (n *Notes) SearchUI(query string) ([]SearchHit, error) {
 }
 
 func (n *Notes) search(query string, limit int) ([]SearchHit, error) {
-	match := ftsQuery(query)
-	if match == "" {
+	terms := ftsTerms(query)
+	if len(terms) == 0 {
 		return []SearchHit{}, nil
 	}
+	hits, err := n.searchMatch(strings.Join(terms, " "), limit)
+	if err != nil || len(hits) > 0 || len(terms) == 1 {
+		return hits, err
+	}
+	return n.searchMatch(strings.Join(terms, " OR "), limit)
+}
 
+func (n *Notes) searchMatch(match string, limit int) ([]SearchHit, error) {
 	rows, err := n.db.Query(`
 		SELECT filepath, snippet(notes_fts, 2, '<b>', '</b>', '...', ?)
 		FROM notes_fts
@@ -179,28 +186,78 @@ func (n *Notes) search(query string, limit int) ([]SearchHit, error) {
 	return hits, rows.Err()
 }
 
+var searchStop = map[string]bool{
+	"найди": true, "найти": true, "поищи": true, "поиск": true, "search": true,
+	"заметки": true, "заметку": true, "заметка": true, "заметке": true, "заметках": true,
+	"про": true, "для": true, "при": true, "или": true, "что": true, "как": true,
+	"это": true, "the": true, "for": true, "мне": true, "меня": true,
+	"упоминания": true, "упоминание": true, "упоминаний": true,
+}
+
+var ruSuffixes = []string{
+	"ами", "ями", "ыми", "ими", "ого", "его", "ему", "ому",
+	"ах", "ях", "ом", "ем", "ой", "ей", "ий", "ый", "ое", "ее",
+	"ая", "яя", "ие", "ые", "ам", "ям", "ов", "ев", "ью", "ия", "ии",
+	"а", "я", "у", "ю", "о", "е", "ы", "и",
+}
+
 func ftsQuery(q string) string {
+	return strings.Join(ftsTerms(q), " ")
+}
+
+func ftsTerms(q string) []string {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return ""
+		return nil
 	}
 	if len([]rune(q)) > maxSearchQuery {
 		q = string([]rune(q)[:maxSearchQuery])
 	}
 
 	var parts []string
+	seen := map[string]struct{}{}
 	for _, word := range strings.Fields(q) {
 		var b strings.Builder
 		for _, r := range word {
 			if unicode.IsLetter(r) || unicode.IsNumber(r) {
-				b.WriteRune(r)
+				b.WriteRune(unicode.ToLower(r))
 			}
 		}
-		if b.Len() > 0 {
-			parts = append(parts, b.String()+"*")
+		tok := b.String()
+		if tok == "" || searchStop[tok] || (len([]rune(tok)) <= 2 && !hasDigit(tok)) {
+			continue
+		}
+		term := stemToken(tok) + "*"
+		if _, ok := seen[term]; ok {
+			continue
+		}
+		seen[term] = struct{}{}
+		parts = append(parts, term)
+	}
+	return parts
+}
+
+func hasDigit(s string) bool {
+	for _, r := range s {
+		if unicode.IsNumber(r) {
+			return true
 		}
 	}
-	return strings.Join(parts, " ")
+	return false
+}
+
+func stemToken(s string) string {
+	rs := []rune(s)
+	for _, suf := range ruSuffixes {
+		sr := []rune(suf)
+		if len(rs)-len(sr) < 4 {
+			continue
+		}
+		if strings.HasSuffix(s, suf) {
+			return string(rs[:len(rs)-len(sr)])
+		}
+	}
+	return s
 }
 
 func indexTitle(rel, body string) string {

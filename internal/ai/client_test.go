@@ -141,13 +141,16 @@ func TestAgent_blocksTrashNote(t *testing.T) {
 
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
-		{Role: RoleUser, Content: "убери old.md"},
+		{Role: RoleUser, Content: "old.md в архив"},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.NotesChanged {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.Content != storage.BlockedMutationMsg {
+		t.Fatalf("content = %q", result.Content)
 	}
 	if _, err := notes.Get("old.md"); err != nil {
 		t.Fatalf("note should remain: %v", err)

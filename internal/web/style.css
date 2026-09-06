@@ -1083,6 +1083,39 @@ body[data-screen="notes"] {
   top: auto;
   min-width: 0;
   max-width: min(420px, calc(100vw - 16px));
+  max-height: 280px;
+  overflow: hidden;
+}
+
+.notes-chat__attach-search {
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 4px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: #111;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.notes-chat__attach-search::placeholder {
+  color: #555;
+}
+
+.notes-chat__attach-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.notes-chat__attach-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .notes-chat__attach-item {
@@ -1091,17 +1124,13 @@ body[data-screen="notes"] {
   min-width: 0;
 }
 
-.notes-chat__attach-toggle,
-.notes-chat__attach-toggle-spacer {
-  flex: 0 0 20px;
-  width: 20px;
-  margin-top: 1px;
-}
-
 .notes-chat__attach-toggle {
+  flex: 0 0 20px;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  margin-top: 1px;
   padding: 0;
   border: none;
   border-radius: 6px;
@@ -1138,7 +1167,7 @@ body[data-screen="notes"] {
   flex: 1;
   min-width: 0;
   gap: 8px;
-  padding-left: calc(6px + var(--depth, 0) * 14px) !important;
+  padding-left: calc(6px + var(--depth, 0) * 20px) !important;
 }
 
 .notes-chat__attach-icon {
@@ -1303,9 +1332,8 @@ body[data-screen="notes"] {
 
 .notes-chat__icon-btn--on-user {
   position: absolute;
-  top: 50%;
+  top: 7px;
   right: 7px;
-  transform: translateY(-50%);
   background: #222;
 }
 
@@ -1409,6 +1437,31 @@ body[data-screen="notes"] {
   color: #fca5a5;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.notes-chat__system {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #171717;
+}
+
+.notes-chat__system-badge {
+  color: #555;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.notes-chat__system-text {
+  margin: 0;
+  color: #888;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .notes-chat__actions {

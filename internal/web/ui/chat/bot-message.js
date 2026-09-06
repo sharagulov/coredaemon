@@ -79,6 +79,22 @@ export function createBotPending() {
   return wrap;
 }
 
+/**
+ * @param {{ content?: string, at?: number|string|Date }} opts
+ */
+export function createSystemMessage({ content, at }) {
+  const wrap = el("div", "notes-chat__system");
+  const badge = el("span", "notes-chat__system-badge");
+  badge.textContent = "Системное";
+  wrap.appendChild(badge);
+  const text = el("p", "notes-chat__system-text");
+  text.textContent = content || "";
+  wrap.appendChild(text);
+  const time = createChatTime(at);
+  if (time) wrap.appendChild(time);
+  return wrap;
+}
+
 /** @param {string} text */
 export function createBotError(text) {
   const err = el("p", "notes-chat__error");

@@ -83,8 +83,6 @@ function createAttachItem({ kind, value, label, path, depth, expandable, expande
     toggle.classList.toggle("is-expanded", !!expanded);
     toggle.appendChild(icon("assets/icon-chevron.png", "notes-chat__attach-toggle-icon"));
     item.appendChild(toggle);
-  } else {
-    item.appendChild(el("span", "notes-chat__attach-toggle-spacer"));
   }
 
   const row = el("button", "notes-chat__option notes-chat__attach-row", {
@@ -112,6 +110,29 @@ function createAttachItem({ kind, value, label, path, depth, expandable, expande
   return item;
 }
 
+function normalizeQuery(q) {
+  return String(q || "").trim().toLowerCase();
+}
+
+function noteMatches(note, q, noteLabel) {
+  if (!q) return true;
+  const title = String(note.title || noteLabel(note.name) || "").toLowerCase();
+  const name = String(note.name || "").toLowerCase();
+  return title.includes(q) || name.includes(q);
+}
+
+function expandAncestors(notes, expanded) {
+  for (const note of notes) {
+    const parts = String(note.name || "").split("/");
+    parts.pop();
+    let path = "";
+    for (const part of parts) {
+      path = path ? `${path}/${part}` : part;
+      expanded.add(path);
+    }
+  }
+}
+
 /**
  * @param {Element} menu
  * @param {{
@@ -119,12 +140,16 @@ function createAttachItem({ kind, value, label, path, depth, expandable, expande
  *   taken: Set<string>,
  *   expanded: Set<string>,
  *   noteLabel: (name: string) => string,
+ *   query?: string,
  * }} opts
  * @returns {number}
  */
-export function renderAttachMenu(menu, { notes, taken, expanded, noteLabel }) {
+export function renderAttachMenu(menu, { notes, taken, expanded, noteLabel, query = "" }) {
   menu.innerHTML = "";
-  const root = buildTree(notes);
+  const q = normalizeQuery(query);
+  const visible = q ? (notes || []).filter((n) => noteMatches(n, q, noteLabel)) : (notes || []);
+  if (q) expandAncestors(visible, expanded);
+  const root = buildTree(visible);
   let count = 0;
 
   function walk(node, depth) {
@@ -161,7 +186,7 @@ export function renderAttachMenu(menu, { notes, taken, expanded, noteLabel }) {
 
   if (!count) {
     const empty = el("div", "notes-chat__option notes-chat__option--empty");
-    empty.textContent = "Нечего прикрепить";
+    empty.textContent = q ? "Ничего не найдено" : "Нечего прикрепить";
     menu.appendChild(empty);
   }
   return count;

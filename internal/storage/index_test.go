@@ -111,11 +111,37 @@ func TestSearch_tool(t *testing.T) {
 }
 
 func TestFtsQuery(t *testing.T) {
-	if got := ftsQuery("рецепт пирога?"); got != "рецепт* пирога*" {
+	if got := ftsQuery("рецепт пирога?"); got != "рецепт* пирог*" {
+		t.Fatalf("got %q", got)
+	}
+	if got := ftsQuery("найди заметки про шарика"); got != "шарик*" {
 		t.Fatalf("got %q", got)
 	}
 	if ftsQuery("***") != "" {
 		t.Fatal("expected empty")
+	}
+}
+
+func TestSearch_inflectedAndCommandWords(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("dog.md", "Шарик — собака"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Save("tz.md", "Техническое задание на модуль"); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := n.Search("шарика")
+	if err != nil || len(hits) != 1 || hits[0].File != "dog.md" {
+		t.Fatalf("шарика = %+v, err = %v", hits, err)
+	}
+	hits, err = n.Search("найди заметки про шарика")
+	if err != nil || len(hits) != 1 || hits[0].File != "dog.md" {
+		t.Fatalf("command query = %+v, err = %v", hits, err)
+	}
+	hits, err = n.Search("техническим заданием")
+	if err != nil || len(hits) != 1 || hits[0].File != "tz.md" {
+		t.Fatalf("tz = %+v, err = %v", hits, err)
 	}
 }
 
