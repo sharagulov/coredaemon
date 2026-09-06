@@ -354,6 +354,9 @@ func (n *Notes) validateSectionID(id string) error {
 	if id == "" {
 		return nil
 	}
+	if sectionNameHasPath(id) {
+		return ErrSectionInvalid
+	}
 	if _, reserved := reservedSectionIDs[id]; reserved {
 		return ErrSectionInvalid
 	}

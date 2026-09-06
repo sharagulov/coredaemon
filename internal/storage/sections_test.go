@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -25,6 +27,29 @@ func TestCreateSection(t *testing.T) {
 	}
 	if _, err := n.CreateSection(""); err != ErrSectionInvalid {
 		t.Fatalf("empty err = %v", err)
+	}
+}
+
+func TestCreateSection_rejectsPathNames(t *testing.T) {
+	dir := t.TempDir()
+	n, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = n.Close() })
+
+	for _, name := range []string{"foo/bar", `foo\bar`, "../secret", "foo/../bar"} {
+		if _, err := n.CreateSection(name); err != ErrSectionInvalid {
+			t.Fatalf("CreateSection(%q) = %v", name, err)
+		}
+	}
+
+	list, err := n.ListSections()
+	if err != nil || len(list) != 0 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sectionsFileName)); !os.IsNotExist(err) {
+		t.Fatalf("sections file should not be written: %v", err)
 	}
 }
 
@@ -109,5 +134,8 @@ func TestValidateSectionID(t *testing.T) {
 	bad := "missing"
 	if err := n.validateSectionID(bad); err != ErrSectionNotFound {
 		t.Fatalf("err = %v", err)
+	}
+	if err := n.validateSectionID("../secret"); err != ErrSectionInvalid {
+		t.Fatalf("path err = %v", err)
 	}
 }

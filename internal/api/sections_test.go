@@ -3,7 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/core-daemon/core-daemon/internal/storage"
@@ -82,6 +83,9 @@ func TestSections_errors(t *testing.T) {
 		{name: "blank name", method: http.MethodPost, path: "/api/sections", body: `{"name":"   "}`, want: http.StatusBadRequest, err: "invalid section name"},
 		{name: "reserved trash", method: http.MethodPost, path: "/api/sections", body: `{"name":"trash"}`, want: http.StatusBadRequest, err: "invalid section name"},
 		{name: "reserved all", method: http.MethodPost, path: "/api/sections", body: `{"name":"all"}`, want: http.StatusBadRequest, err: "invalid section name"},
+		{name: "slash", method: http.MethodPost, path: "/api/sections", body: `{"name":"foo/bar"}`, want: http.StatusBadRequest, err: "invalid section name"},
+		{name: "backslash", method: http.MethodPost, path: "/api/sections", body: `{"name":"foo\\bar"}`, want: http.StatusBadRequest, err: "invalid section name"},
+		{name: "dotdot", method: http.MethodPost, path: "/api/sections", body: `{"name":"../secret"}`, want: http.StatusBadRequest, err: "invalid section name"},
 		{name: "delete missing", method: http.MethodDelete, path: "/api/sections/missing", body: "", want: http.StatusNotFound, err: "section not found"},
 		{name: "delete reserved", method: http.MethodDelete, path: "/api/sections/trash", body: "", want: http.StatusBadRequest, err: "invalid section"},
 	}
@@ -99,31 +103,41 @@ func TestSections_errors(t *testing.T) {
 	}
 }
 
-func TestSections_pathLikeNamesAreSanitized(t *testing.T) {
-	mux, _ := mountNotes(t)
+func TestSections_rejectsPathNames(t *testing.T) {
+	dir := t.TempDir()
+	notes, err := storage.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	mux := http.NewServeMux()
+	MountNotes(mux, notes)
 
-	cases := []struct {
-		name string
-		body string
-	}{
-		{name: "slash", body: `{"name":"foo/bar"}`},
-		{name: "dotdot", body: `{"name":"../secret"}`},
+	for _, body := range []string{`{"name":"foo/bar"}`, `{"name":"../secret"}`} {
+		rec := serveJSON(t, mux, http.MethodPost, "/api/sections", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status = %d, resp = %s", body, rec.Code, rec.Body.String())
+		}
+		if got := decodeAPIError(t, rec); got != "invalid section name" {
+			t.Fatalf("error = %q", got)
+		}
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := serveJSON(t, mux, http.MethodPost, "/api/sections", tc.body)
-			if rec.Code != http.StatusCreated {
-				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-			}
-			var sec storage.Section
-			if err := json.Unmarshal(rec.Body.Bytes(), &sec); err != nil {
-				t.Fatal(err)
-			}
-			if sec.ID == "" || strings.Contains(sec.ID, "/") || strings.Contains(sec.ID, "..") {
-				t.Fatalf("id must be sanitized: %+v", sec)
-			}
-		})
+	list, err := notes.ListSections()
+	if err != nil || len(list) != 0 {
+		t.Fatalf("sections = %+v, err = %v", list, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".sections.json")); !os.IsNotExist(err) {
+		t.Fatalf("sections file should not be written: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			t.Fatalf("unexpected directory %q", e.Name())
+		}
 	}
 }
 

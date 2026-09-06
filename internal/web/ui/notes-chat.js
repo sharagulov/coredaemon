@@ -535,5 +535,5 @@ export function createNotesChat({
     if (!sending) setBusy(false);
   });
 
-  return { closeMenus, isOpen, setOpen, attachNote };
+  return { closeMenus, closeContextMenu: header.closeContextMenu, isOpen, setOpen, attachNote };
 }

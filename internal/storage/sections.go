@@ -71,7 +71,7 @@ func (n *Notes) ListSections() ([]Section, error) {
 // CreateSection adds a custom section.
 func (n *Notes) CreateSection(name string) (Section, error) {
 	name = cleanSectionName(name)
-	if name == "" {
+	if name == "" || sectionNameHasPath(name) {
 		return Section{}, ErrSectionInvalid
 	}
 	id := slugFromSectionName(name)
@@ -178,6 +178,10 @@ func sortSections(list []Section) {
 	sort.Slice(list, func(i, j int) bool {
 		return strings.ToLower(list[i].Name) < strings.ToLower(list[j].Name)
 	})
+}
+
+func sectionNameHasPath(name string) bool {
+	return strings.ContainsAny(name, `/\`) || strings.Contains(name, "..")
 }
 
 func cleanSectionName(name string) string {

@@ -941,6 +941,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
       { rootSelector: ".notes-filter", close: closeFilterMenu },
       { rootSelector: ".notes-editor__section", close: closeSectionMenu },
       { rootSelector: ".notes-ctx", close: closeContextMenu },
+      { rootSelector: ".notes-chat__ctx", close: () => notesChat.closeContextMenu?.() },
       { rootSelector: ".notes-chat__title-wrap", close: notesChat.closeMenus },
       { rootSelector: ".notes-chat__attach-wrap", close: notesChat.closeMenus },
     ]);

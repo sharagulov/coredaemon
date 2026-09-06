@@ -85,9 +85,7 @@ export function createNoteSectionPicker({
   });
 
   function sync() {
-    const label = getLabel();
-    labelEl.textContent = label;
-    labelEl.classList.toggle("is-muted", label === "Без раздела");
+    labelEl.textContent = getLabel();
     btn.disabled = isDisabled();
     if (btn.disabled) dropdown.close();
   }

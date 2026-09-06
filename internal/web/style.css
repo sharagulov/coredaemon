@@ -1211,6 +1211,16 @@ body[data-screen="notes"] {
   display: none !important;
 }
 
+.notes-chat__ctx {
+  position: fixed;
+  z-index: 100;
+  inset: auto;
+}
+
+.notes-chat__ctx[hidden] {
+  display: none !important;
+}
+
 .notes-chat__option {
   display: flex;
   align-items: center;
@@ -1235,68 +1245,6 @@ body[data-screen="notes"] {
 .notes-chat__option--empty {
   color: #555;
   cursor: default;
-}
-
-.notes-chat__chat-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.notes-chat__chat-row .notes-chat__option {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.notes-chat__chat-del {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 25px;
-  height: 25px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.notes-chat__chat-row:hover .notes-chat__chat-del,
-.notes-chat__chat-del:focus-visible {
-  opacity: 1;
-}
-
-.notes-chat__chat-del:hover {
-  background: #222;
-}
-
-.notes-chat__chat-del-icon {
-  position: relative;
-  display: block;
-  width: 10px;
-  height: 10px;
-  overflow: clip;
-  opacity: 0.5;
-}
-
-.notes-chat__chat-del-icon img {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.notes-chat__chat-del:hover .notes-chat__chat-del-icon {
-  opacity: 1;
 }
 
 .notes-chat__icon-btn {
@@ -1950,8 +1898,8 @@ span.notes-chat__pill {
   flex-shrink: 0;
 }
 
-.notes-editor__section-label.is-muted {
-  color: #555;
+.notes-editor__section-label {
+  color: #fff;
 }
 
 .notes-editor__section-option {

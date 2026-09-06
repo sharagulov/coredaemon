@@ -1,6 +1,7 @@
 import { el, icon } from "../dom.js";
 import { createDropdown } from "../dropdown.js";
 import { syncMenuOptions } from "../menu-option.js";
+import { createContextMenu, createContextAction } from "../context-menu.js";
 import { createChatIconButton } from "./icon-btn.js";
 import { createChatOption } from "./chat-option.js";
 
@@ -33,7 +34,28 @@ export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDel
     "aria-label": "Чаты",
   });
   titleMenu.hidden = true;
-  wrap.append(titleBtn, titleMenu);
+
+  const ctxRoot = el("div", "notes-chat__ctx", { hidden: "", "aria-hidden": "true" });
+  const ctxMenu = el("div", "notes-ctx__menu", { role: "menu" });
+  ctxRoot.appendChild(ctxMenu);
+
+  wrap.append(titleBtn, titleMenu, ctxRoot);
+
+  const chatCtx = createContextMenu({ root: ctxRoot, menu: ctxMenu });
+  chatCtx.mount();
+
+  function openChatContextMenu(e, id) {
+    chatCtx.openAt(e, (menu) => {
+      menu.appendChild(createContextAction({
+        label: "Удалить",
+        danger: true,
+        onClick: () => {
+          chatCtx.close();
+          onDelete(id);
+        },
+      }));
+    });
+  }
 
   const newBtn = createChatIconButton({
     extraClass: "notes-chat__new",
@@ -54,6 +76,7 @@ export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDel
       dropdown.close();
     },
     onOpen: () => {
+      chatCtx.close();
       titleMenu.innerHTML = "";
       const activeId = getActiveId();
       for (const chat of getChats()) {
@@ -61,7 +84,7 @@ export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDel
           id: chat.id,
           label: chat.title,
           active: chat.id === activeId,
-          onDelete,
+          onContextMenu: openChatContextMenu,
         }));
       }
       syncMenuOptions(titleMenu, ".notes-chat__option", activeId, "id");
@@ -78,6 +101,10 @@ export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDel
     setBusy(busy) {
       newBtn.disabled = busy;
     },
-    closeMenu: dropdown.close,
+    closeMenu() {
+      chatCtx.close();
+      dropdown.close();
+    },
+    closeContextMenu: chatCtx.close,
   };
 }
