@@ -29,8 +29,6 @@ type ToolResult struct {
 	Content  string      `json:"content,omitempty"`
 	Hits     []SearchHit `json:"hits,omitempty"`
 	Found    int         `json:"found,omitempty"`
-	Total    int         `json:"total,omitempty"`
-	Listed   bool        `json:"listed,omitempty"`
 	Query    string      `json:"query,omitempty"`
 	Error    string      `json:"error,omitempty"`
 	Previous string      `json:"-"`
@@ -127,6 +125,9 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{Status: "error", Error: "invalid arguments"}, nil
 		}
+		if err := rejectForeignScript(p.Title, p.Content); err != nil {
+			return ToolResult{Status: "error", Error: err.Error()}, nil
+		}
 		title := cleanTitle(p.Title)
 		note, err := n.CreateNote(title, p.Content)
 		if err != nil {
@@ -145,6 +146,9 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{Status: "error", Error: "invalid arguments"}, nil
+		}
+		if err := rejectForeignScript(p.Content); err != nil {
+			return ToolResult{Status: "error", Error: err.Error()}, nil
 		}
 		name := normalizeFilename(p.Filename)
 		existing, err := n.Get(name)
@@ -205,15 +209,9 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 			}
 		}
 		query := stripNameWrap(p.Query)
-		if query == "" || query == "*" || len(ftsTerms(query)) == 0 {
-			return n.listNotesTool(listNotesToolLimit, scope)
-		}
 		hits, err := n.Search(query)
 		if err != nil {
 			return ToolResult{Status: "error", Error: err.Error()}, nil
-		}
-		if len(hits) == 0 {
-			hits = n.lookupNoteHits(query)
 		}
 		hits, err = n.filterHitsByScope(hits, scope)
 		if err != nil {
@@ -222,11 +220,7 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 		if hits == nil {
 			hits = []SearchHit{}
 		}
-		total, err := n.countScope(scope)
-		if err != nil {
-			return ToolResult{Status: "error", Error: err.Error()}, nil
-		}
-		return ToolResult{Status: "success", Hits: hits, Found: len(hits), Total: total, Query: query}, nil
+		return ToolResult{Status: "success", Hits: hits, Found: len(hits), Query: query}, nil
 
 	case "trash_note", "delete_note", "remove_note", "move_note":
 		return ToolResult{Status: "error", Error: BlockedMutationMsg}, nil
@@ -234,47 +228,6 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 	default:
 		return ToolResult{Status: "error", Error: "unknown tool"}, nil
 	}
-}
-
-func (n *Notes) listNotesTool(limit int, scope string) (ToolResult, error) {
-	list, err := n.List()
-	if err != nil {
-		return ToolResult{Status: "error", Error: err.Error()}, nil
-	}
-	hits := make([]SearchHit, 0, min(limit, len(list)))
-	found := 0
-	for _, note := range list {
-		if !NoteMatchesScope(note.Section, note.Important, scope) {
-			continue
-		}
-		found++
-		if len(hits) >= limit {
-			continue
-		}
-		hits = append(hits, SearchHit{
-			File:    note.Name,
-			Title:   note.Title,
-			Snippet: note.Preview,
-		})
-	}
-	return ToolResult{Status: "success", Hits: hits, Found: found, Total: found, Listed: true}, nil
-}
-
-func (n *Notes) countScope(scope string) (int, error) {
-	list, err := n.List()
-	if err != nil {
-		return 0, err
-	}
-	if scope == "" {
-		return len(list), nil
-	}
-	ncount := 0
-	for _, note := range list {
-		if NoteMatchesScope(note.Section, note.Important, scope) {
-			ncount++
-		}
-	}
-	return ncount, nil
 }
 
 func (n *Notes) filterHitsByScope(hits []SearchHit, scope string) ([]SearchHit, error) {
@@ -400,6 +353,17 @@ func slugFromTitle(title string) string {
 	return slug
 }
 
+func rejectForeignScript(parts ...string) error {
+	for _, s := range parts {
+		for _, r := range s {
+			if unicode.Is(unicode.Han, r) {
+				return errors.New("текст заметки должен быть на русском")
+			}
+		}
+	}
+	return nil
+}
+
 func stripNameWrap(name string) string {
 	return strings.TrimSpace(strings.Trim(strings.TrimSpace(name), "«»\"'`"))
 }
@@ -423,6 +387,27 @@ func swapLookalikes(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// foldLookalikes maps Latin/Cyrillic lookalikes only in mixed-script tokens
+// (e.g. "Nоски.md" → "Носки.md"). Pure English queries stay untouched.
+func foldLookalikes(s string) string {
+	hasCyr := false
+	hasLatinLookalike := false
+	for _, r := range s {
+		switch {
+		case unicode.Is(unicode.Cyrillic, r):
+			hasCyr = true
+		default:
+			if _, ok := latinToCyr[r]; ok {
+				hasLatinLookalike = true
+			}
+		}
+	}
+	if hasCyr && hasLatinLookalike {
+		return swapLookalikes(s)
+	}
+	return s
 }
 
 var latinToCyr = map[rune]rune{
@@ -464,40 +449,4 @@ func (n *Notes) lookupNoteHit(query string) (SearchHit, bool) {
 		}
 	}
 	return SearchHit{}, false
-}
-
-func (n *Notes) lookupNoteHits(query string) []SearchHit {
-	if hit, ok := n.lookupNoteHit(query); ok {
-		return []SearchHit{hit}
-	}
-	words := strings.Fields(titleKey(strings.TrimSuffix(stripNameWrap(query), ".md")))
-	var keys []string
-	for _, w := range words {
-		if searchStop[w] || (len([]rune(w)) <= 2 && !hasDigit(w)) {
-			continue
-		}
-		keys = append(keys, w)
-	}
-	if len(keys) == 0 {
-		return nil
-	}
-	list, err := n.List()
-	if err != nil {
-		return nil
-	}
-	hits := make([]SearchHit, 0)
-	for _, note := range list {
-		blob := titleKey(note.Name + " " + note.Title + " " + note.Preview)
-		ok := true
-		for _, w := range keys {
-			if !strings.Contains(blob, w) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			hits = append(hits, SearchHit{File: note.Name, Title: note.Title, Snippet: note.Preview})
-		}
-	}
-	return hits
 }

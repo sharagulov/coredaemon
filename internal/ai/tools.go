@@ -20,7 +20,7 @@ func NoteTools() []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "create_note",
-				Description: "Create a new .md note file on disk",
+				Description: "Create one new .md note file on disk. Call once per note.",
 				Parameters: map[string]any{
 					"type":     "object",
 					"required": []string{"title", "content"},
@@ -31,7 +31,7 @@ func NoteTools() []Tool {
 						},
 						"content": map[string]any{
 							"type":        "string",
-							"description": "Note body only. Do not repeat the title as a markdown heading.",
+							"description": "Note body in Russian. Do not repeat the title as a markdown heading.",
 						},
 					},
 				},
@@ -79,15 +79,16 @@ func NoteTools() []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "search_notes",
-				Description: "Search notes by keywords. Omit query (or pass empty) to list all notes and get the total in found.",
+				Description: "Search notes by keywords via FTS. Requires a query; empty query returns no hits.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"query": map[string]any{
 							"type":        "string",
-							"description": "Search words, e.g. рецепт пирога. Empty or omit to list all notes.",
+							"description": "Search words, e.g. рецепт пирога or мерседес.",
 						},
 					},
+					"required": []string{"query"},
 				},
 			},
 		},

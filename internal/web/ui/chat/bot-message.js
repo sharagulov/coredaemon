@@ -7,6 +7,19 @@ import { createChatTime } from "./time.js";
 
 const BADGE_LIMIT = 2;
 
+function createPills(files, limit, onOpenNote) {
+  const shown = files.slice(0, limit);
+  if (!shown.length) return null;
+  const pills = el("div", "notes-chat__pills");
+  for (const file of shown) {
+    pills.appendChild(createChatPill(file, { onOpen: onOpenNote }));
+  }
+  if (files.length > limit) {
+    pills.appendChild(createChatMorePill(files.length - limit));
+  }
+  return pills;
+}
+
 /**
  * @param {{
  *   content?: string,
@@ -35,7 +48,7 @@ export function createBotMessage({
   }
 
   const md = el("div", "notes-chat__md md-preview");
-  renderMarkdown(md, content || "", { copyIcon: "assets/icon-chat-copy.png" });
+  renderMarkdown(md, content || "", { copyIcon: "assets/icon-chat-copy.png", chat: true });
   wrap.appendChild(md);
 
   const actions = el("div", "notes-chat__actions");
@@ -51,23 +64,16 @@ export function createBotMessage({
   if (time) meta.appendChild(time);
   actions.appendChild(meta);
 
-  const files = [...(created || []), ...(updated || [])];
+  const written = [...new Set([...(created || []), ...(updated || [])].filter(Boolean))];
+  const found = [];
   if (searched) {
     for (const hit of matches || []) {
-      if (hit.file) files.push(hit.file);
+      if (hit.file && !written.includes(hit.file)) found.push(hit.file);
     }
   }
-  const unique = [...new Set(files)];
-  if (unique.length) {
-    const pills = el("div", "notes-chat__pills");
-    for (const file of unique.slice(0, BADGE_LIMIT)) {
-      pills.appendChild(createChatPill(file, { onOpen: onOpenNote }));
-    }
-    if (unique.length > BADGE_LIMIT) {
-      pills.appendChild(createChatMorePill(unique.length - BADGE_LIMIT));
-    }
-    actions.appendChild(pills);
-  }
+  const files = [...written, ...found];
+  const pills = createPills(files, written.length ? 8 : BADGE_LIMIT, onOpenNote);
+  if (pills) actions.appendChild(pills);
 
   wrap.appendChild(actions);
   return wrap;
@@ -80,9 +86,15 @@ export function createBotPending() {
 }
 
 /**
- * @param {{ content?: string, at?: number|string|Date }} opts
+ * @param {{
+ *   content?: string,
+ *   at?: number|string|Date,
+ *   created?: string[],
+ *   updated?: string[],
+ *   onOpenNote?: (name: string) => void,
+ * }} opts
  */
-export function createSystemMessage({ content, at }) {
+export function createSystemMessage({ content, at, created, updated, onOpenNote }) {
   const wrap = el("div", "notes-chat__system");
   const badge = el("span", "notes-chat__system-badge");
   badge.textContent = "Системное";
@@ -90,6 +102,9 @@ export function createSystemMessage({ content, at }) {
   const text = el("p", "notes-chat__system-text");
   text.textContent = content || "";
   wrap.appendChild(text);
+  const files = [...new Set([...(created || []), ...(updated || [])].filter(Boolean))];
+  const pills = createPills(files, 8, onOpenNote);
+  if (pills) wrap.appendChild(pills);
   const time = createChatTime(at);
   if (time) wrap.appendChild(time);
   return wrap;

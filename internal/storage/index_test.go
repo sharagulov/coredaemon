@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,12 +101,9 @@ func TestSearch_tool(t *testing.T) {
 		t.Fatalf("empty search = %+v, err = %v", empty, err)
 	}
 
-	listed, err := n.RunTool("search_notes", []byte(`{}`))
-	if err != nil || listed.Status != "success" || listed.Found != 1 || len(listed.Hits) != 1 {
-		t.Fatalf("list all = %+v, err = %v", listed, err)
-	}
-	if listed.Hits[0].File != "tea.md" {
-		t.Fatalf("listed file = %q", listed.Hits[0].File)
+	blank, err := n.RunTool("search_notes", []byte(`{}`))
+	if err != nil || blank.Status != "success" || blank.Found != 0 || len(blank.Hits) != 0 {
+		t.Fatalf("empty query = %+v, err = %v", blank, err)
 	}
 
 	byFile, err := n.RunTool("search_notes", []byte(`{"query":"tea.md"}`))
@@ -116,11 +112,8 @@ func TestSearch_tool(t *testing.T) {
 	}
 
 	commandOnly, err := n.RunTool("search_notes", []byte(`{"query":"найди заметки"}`))
-	if err != nil || commandOnly.Status != "success" || commandOnly.Found != 1 || !commandOnly.Listed {
+	if err != nil || commandOnly.Status != "success" || commandOnly.Found != 0 || len(commandOnly.Hits) != 0 {
 		t.Fatalf("command-only query = %+v, err = %v", commandOnly, err)
-	}
-	if listed.Total != 1 || !listed.Listed {
-		t.Fatalf("list meta = %+v", listed)
 	}
 }
 
@@ -140,20 +133,6 @@ func TestSearch_tool_lookalikeFilename(t *testing.T) {
 	}
 }
 
-func TestSearch_tool_listsBeyondEight(t *testing.T) {
-	n := openTest(t)
-	for i := 0; i < 12; i++ {
-		name := fmt.Sprintf("n%02d.md", i)
-		if _, err := n.Save(name, "body"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	listed, err := n.RunTool("search_notes", []byte(`{}`))
-	if err != nil || listed.Found != 12 || len(listed.Hits) != 12 {
-		t.Fatalf("list = found %d hits %d err %v", listed.Found, len(listed.Hits), err)
-	}
-}
-
 func TestFtsQuery(t *testing.T) {
 	if got := ftsQuery("рецепт пирога?"); got != "рецепт* пирог*" {
 		t.Fatalf("got %q", got)
@@ -169,6 +148,18 @@ func TestFtsQuery(t *testing.T) {
 	}
 	if ftsQuery("***") != "" {
 		t.Fatal("expected empty")
+	}
+	if got := ftsQuery("Nоски.md"); got != "носк*" {
+		t.Fatalf("lookalike query = %q", got)
+	}
+	if got := ftsQuery("tea.md"); got != "tea*" {
+		t.Fatalf("filename query = %q", got)
+	}
+	if got := ftsQuery("test"); got != "test*" {
+		t.Fatalf("latin query = %q", got)
+	}
+	if !Searchable("кошки") || !Searchable("носки") || Searchable("да") {
+		t.Fatal("Searchable")
 	}
 }
 
@@ -208,6 +199,10 @@ func TestSearch_titleWordInPunctuatedName(t *testing.T) {
 	if err != nil || res.Found == 0 || res.Hits[0].File != "Мерседес,-БМВ-и-Ауда.md" {
 		t.Fatalf("мерседес = %+v, err = %v", res, err)
 	}
+	res, err = n.RunTool("search_notes", []byte(`{"query":"что я писал про мерседес"}`))
+	if err != nil || res.Found == 0 || res.Hits[0].File != "Мерседес,-БМВ-и-Ауда.md" {
+		t.Fatalf("user phrase = %+v, err = %v", res, err)
+	}
 	res, err = n.RunTool("search_notes", []byte(`{"query":"груша"}`))
 	if err != nil || res.Found == 0 || res.Hits[0].File != "Груша.md" {
 		t.Fatalf("груша = %+v, err = %v", res, err)
@@ -245,9 +240,9 @@ func TestSearch_rebuildsAfterExternalDelete(t *testing.T) {
 	if err != nil || len(hits) != 0 {
 		t.Fatalf("stale hit = %+v, err = %v", hits, err)
 	}
-	listed, err := n.RunTool("search_notes", []byte(`{}`))
-	if err != nil || listed.Found != 1 {
-		t.Fatalf("list after delete = %+v, err = %v", listed, err)
+	keep, err := n.Search("keep")
+	if err != nil || len(keep) != 1 || keep[0].File != "keep.md" {
+		t.Fatalf("keep after delete = %+v, err = %v", keep, err)
 	}
 }
 

@@ -51,27 +51,46 @@ type ChatResult struct {
 }
 
 // Chat runs the event loop: model → tool calls → storage → model → final text.
-func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress ProgressFunc, scope string) (ChatResult, error) {
+func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress ProgressFunc, scope string, attachments ...string) (ChatResult, error) {
 	scope = strings.TrimSpace(scope)
+	if isVaultCountQuery(lastUserText(userMessages)) && len(attachments) == 0 {
+		return ChatResult{Content: a.vaultCount(scope), System: true}, nil
+	}
 	messages := WithToolSystem(userMessages, a.scopeHint(scope))
-	attachedNotes, attached := a.loadAttachedNotes(scope, userMessages)
+	if count := a.vaultCount(scope); count != "" {
+		messages = append(messages, Message{Role: RoleSystem, Content: count})
+	}
+	attachedNotes, _ := a.loadAttachedNotes(scope, attachments)
 	if attachedNotes != "" {
 		messages = append(messages, Message{Role: RoleSystem, Content: attachedNotes})
+	}
+	searchText, matches, searched := a.loadSearchContext(scope, lastUserText(userMessages))
+	if searchText != "" {
+		messages = append(messages, Message{Role: RoleSystem, Content: searchText})
 	}
 	tools := NoteTools()
 	notesChanged := false
 	nudged := false
-	searched := false
 	blockedHit := false
 	toolFailed := false
-	found := 0
-	total := 0
-	listed := false
-	var reads []readFact
+	readOK := false
+	seenCalls := map[string]struct{}{}
 	var createdFiles, updatedFiles []string
 	createdSet := map[string]struct{}{}
 	previous := map[string]string{}
-	var matches []storage.SearchHit
+
+	finish := func(content string, system bool) ChatResult {
+		return ChatResult{
+			Content:      content,
+			NotesChanged: notesChanged,
+			Created:      createdFiles,
+			Updated:      updatedFiles,
+			Previous:     previousOrNil(previous),
+			Searched:     searched,
+			Matches:      matches,
+			System:       system,
+		}
+	}
 
 	for turn := 0; turn < maxToolTurns; turn++ {
 		if err := ctx.Err(); err != nil {
@@ -88,8 +107,11 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 		}
 
 		if len(msg.ToolCalls) == 0 {
-			content := strings.TrimSpace(msg.Content)
-			if content == "" && !nudged {
+			if notesChanged {
+				return finish(writeFact(createdFiles, updatedFiles), true), nil
+			}
+			content := cleanReply(msg.Content)
+			if content == "" && !nudged && !blockedHit && (readOK || len(matches) > 0 || !searched) {
 				nudged = true
 				nudge := AnswerNudge
 				if toolFailed {
@@ -98,34 +120,31 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				messages = append(messages, Message{Role: RoleSystem, Content: nudge})
 				continue
 			}
+			if blockedHit {
+				return finish(storage.BlockedMutationMsg, true), nil
+			}
+			if searched && len(matches) == 0 && !readOK {
+				return finish(EmptySearchMsg, true), nil
+			}
 			if content == "" {
+				if fact := searchFact(matches); fact != "" {
+					return finish(fact, true), nil
+				}
 				return ChatResult{}, errors.New("empty response from ollama")
 			}
-			out := groundedContent(content, groundArgs{
-				searched:     searched,
-				matches:      matches,
-				found:        found,
-				total:        total,
-				listed:       listed,
-				notesChanged: notesChanged,
-				blocked:      blockedHit,
-				reads:        reads,
-				attached:     attached,
-			})
-			return ChatResult{
-				Content:      out,
-				NotesChanged: notesChanged,
-				Created:      createdFiles,
-				Updated:      updatedFiles,
-				Previous:     previousOrNil(previous),
-				Searched:     searched,
-				Matches:      matches,
-				System:       isSystemReply(out),
-			}, nil
+			if claimsMutation(content) {
+				return finish(storage.BlockedMutationMsg, true), nil
+			}
+			if len(matches) > 0 && claimsNothingFound(content) {
+				return finish(searchFact(matches), true), nil
+			}
+			return finish(content, false), nil
 		}
 
 		msg.Content = ""
 		messages = append(messages, msg)
+		repeated := false
+		vault := a.vaultTotal(scope)
 
 		for _, call := range msg.ToolCalls {
 			if err := ctx.Err(); err != nil {
@@ -139,17 +158,27 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 				blockedHit = true
 				toolFailed = true
 				result := storage.ToolResult{Status: "error", Error: storage.BlockedMutationMsg}
-				logToolResult(name, result)
-				messages = append(messages, toolMessage(name, result))
+				logToolResult(name, result, vault)
+				messages = append(messages, toolMessage(name, result, vault))
 				continue
 			}
 			if !allowedTools[name] {
 				toolFailed = true
 				result := storage.ToolResult{Status: "error", Error: "tool not allowed"}
-				logToolResult(name, result)
-				messages = append(messages, toolMessage(name, result))
+				logToolResult(name, result, vault)
+				messages = append(messages, toolMessage(name, result, vault))
 				continue
 			}
+			key := toolKey(name, call.Function.Arguments)
+			if _, ok := seenCalls[key]; ok {
+				repeated = true
+				toolFailed = true
+				result := storage.ToolResult{Status: "error", Error: RepeatCallMsg}
+				logToolResult(name, result, vault)
+				messages = append(messages, toolMessage(name, result, vault))
+				continue
+			}
+			seenCalls[key] = struct{}{}
 
 			result, err := a.notes.RunToolScoped(name, call.Function.Arguments, scope)
 			if err != nil {
@@ -158,24 +187,15 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			if result.Status != "success" {
 				toolFailed = true
 			}
-			logToolResult(name, result)
+			logToolResult(name, result, vault)
 			if result.Status == "success" && name == "read_note" {
-				reads = append(reads, readFact{File: result.File, Content: result.Content})
+				readOK = true
 			}
 			if name == "search_notes" && result.Status == "success" {
 				searched = true
-				listed = result.Listed
 				matches = result.Hits
 				if matches == nil {
 					matches = []storage.SearchHit{}
-				}
-				found = result.Found
-				if found < len(matches) {
-					found = len(matches)
-				}
-				total = result.Total
-				if total < found {
-					total = found
 				}
 			}
 			if result.Status == "success" && result.File != "" {
@@ -203,10 +223,31 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 					emitProgress(progress, Phase{Kind: "updated", File: result.File, Title: result.Title, Previous: &prev})
 				}
 			}
-			messages = append(messages, toolMessage(name, result))
+			messages = append(messages, toolMessage(name, result, vault))
+		}
+		if repeated {
+			if notesChanged {
+				return finish(writeFact(createdFiles, updatedFiles), true), nil
+			}
+			if nudged {
+				if count := a.vaultCount(scope); count != "" {
+					return finish(count, true), nil
+				}
+			}
+			tools = nil
+			if !nudged {
+				nudged = true
+				messages = append(messages, Message{Role: RoleSystem, Content: AnswerNudge})
+			}
 		}
 	}
 
+	if notesChanged {
+		return finish(writeFact(createdFiles, updatedFiles), true), nil
+	}
+	if count := a.vaultCount(scope); count != "" {
+		return finish(count, true), nil
+	}
 	return ChatResult{}, fmt.Errorf("tool loop exceeded %d turns", maxToolTurns)
 }
 
@@ -215,7 +256,7 @@ func (a *Agent) scopeHint(scope string) string {
 		return ""
 	}
 	if scope == "important" {
-		return " Работай только с заметками из раздела «Важные»."
+		return "\nРаботай только с заметками из раздела «Важные»."
 	}
 	sections, err := a.notes.ListSections()
 	if err != nil {
@@ -223,7 +264,7 @@ func (a *Agent) scopeHint(scope string) string {
 	}
 	for _, s := range sections {
 		if s.ID == scope {
-			return fmt.Sprintf(" Работай только с заметками из раздела «%s».", s.Name)
+			return fmt.Sprintf("\nРаботай только с заметками из раздела «%s».", s.Name)
 		}
 	}
 	return ""
@@ -236,83 +277,6 @@ func previousOrNil(previous map[string]string) map[string]string {
 	return previous
 }
 
-func isSystemReply(s string) bool {
-	return s == storage.BlockedMutationMsg || s == EmptySearchReply
-}
-
-type readFact struct {
-	File    string
-	Content string
-}
-
-type groundArgs struct {
-	searched     bool
-	matches      []storage.SearchHit
-	found        int
-	total        int
-	listed       bool
-	notesChanged bool
-	blocked      bool
-	reads        []readFact
-	attached     bool
-}
-
-func groundedContent(content string, g groundArgs) string {
-	if g.blocked {
-		return storage.BlockedMutationMsg
-	}
-	if g.notesChanged {
-		return content
-	}
-	if g.attached || len(g.reads) > 0 {
-		return content
-	}
-	if g.searched {
-		if g.listed {
-			return formatNoteList(g.matches, g.found)
-		}
-		if len(g.matches) == 0 {
-			return EmptySearchReply
-		}
-		return formatSearchHits(g.matches, g.found, g.total)
-	}
-	return content
-}
-
-func formatNoteList(hits []storage.SearchHit, found int) string {
-	if found < len(hits) {
-		found = len(hits)
-	}
-	var b strings.Builder
-	b.WriteString("Всего заметок: ")
-	b.WriteString(fmt.Sprintf("%d", found))
-	for _, h := range hits {
-		b.WriteString("\n• ")
-		b.WriteString(h.File)
-	}
-	return b.String()
-}
-
-func formatSearchHits(hits []storage.SearchHit, found, total int) string {
-	if found < len(hits) {
-		found = len(hits)
-	}
-	var b strings.Builder
-	b.WriteString("Найдено: ")
-	b.WriteString(fmt.Sprintf("%d", found))
-	if total > found {
-		b.WriteString(fmt.Sprintf(" из %d", total))
-	}
-	if found > len(hits) {
-		b.WriteString(fmt.Sprintf(" (показаны %d)", len(hits)))
-	}
-	for _, h := range hits {
-		b.WriteString("\n• ")
-		b.WriteString(h.File)
-	}
-	return b.String()
-}
-
 func toolCallNames(calls []ToolCall) []string {
 	out := make([]string, 0, len(calls))
 	for _, c := range calls {
@@ -323,16 +287,55 @@ func toolCallNames(calls []ToolCall) []string {
 	return out
 }
 
-func logToolResult(name string, result storage.ToolResult) {
-	body, _ := json.Marshal(result)
-	log.Printf("agent: %s -> %s", name, body)
+func logToolResult(name string, result storage.ToolResult, vault int) {
+	log.Printf("agent: %s -> %s", name, encodeToolResult(name, result, vault))
 }
 
-func toolMessage(name string, result storage.ToolResult) Message {
-	body, _ := json.Marshal(result)
+func toolMessage(name string, result storage.ToolResult, vault int) Message {
 	return Message{
 		Role:     RoleTool,
 		ToolName: name,
-		Content:  string(body),
+		Content:  string(encodeToolResult(name, result, vault)),
 	}
+}
+
+func encodeToolResult(name string, result storage.ToolResult, vault int) []byte {
+	if name == "search_notes" && result.Status == "success" {
+		hits := result.Hits
+		if hits == nil {
+			hits = []storage.SearchHit{}
+		}
+		body, _ := json.Marshal(struct {
+			Status string              `json:"status"`
+			Hits   []storage.SearchHit `json:"hits"`
+			Found  int                 `json:"found"`
+			Vault  int                 `json:"vault"`
+			Query  string              `json:"query,omitempty"`
+		}{Status: result.Status, Hits: hits, Found: result.Found, Vault: vault, Query: result.Query})
+		return body
+	}
+	body, _ := json.Marshal(result)
+	return body
+}
+
+func toolKey(name string, args json.RawMessage) string {
+	raw := strings.TrimSpace(string(args))
+	if raw == "" || raw == "null" {
+		raw = "{}"
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return name + " " + raw
+	}
+	if name == "search_notes" {
+		q, _ := m["query"].(string)
+		q = strings.TrimSpace(q)
+		if q == "*" {
+			q = ""
+		}
+		body, _ := json.Marshal(map[string]string{"query": q})
+		return name + " " + string(body)
+	}
+	body, _ := json.Marshal(m)
+	return name + " " + string(body)
 }

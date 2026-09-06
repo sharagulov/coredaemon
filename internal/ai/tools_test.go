@@ -99,12 +99,136 @@ func TestAgent_searchUsesToolHits(t *testing.T) {
 	if !result.Searched || len(result.Matches) != 1 || result.Matches[0].File != "dog.md" {
 		t.Fatalf("result = %+v", result)
 	}
-	if result.Content != "Найдено: 1\n• dog.md" {
+	if result.Content != "выдумал десять заметок" {
 		t.Fatalf("content = %q", result.Content)
 	}
 }
 
-func TestAgent_emptySearchReplacesModel(t *testing.T) {
+func TestAgent_searchStripsMarkdownLinks(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"search_notes","arguments":{"query":"шарика"}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Нашёл [Ссылка на dog](dog.md) и [Шарик](dog.md)."}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("dog.md", "Шарик — собака"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "найди заметки про шарика"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Content, "](") || strings.Contains(result.Content, "Ссылка") {
+		t.Fatalf("content = %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "Шарик") {
+		t.Fatalf("content = %q", result.Content)
+	}
+}
+
+func TestAgent_linkOnlyReplyFallsBackToFiles(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"- [Ссылка на Шарик](dog.md)"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("dog.md", "Шарик — собака"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "найди заметки про шарика"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "Найдено: dog.md" || !result.System {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestAgent_deleteClaimReplacedByRefusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Удалено: Мышки.md"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Мышки.md", "полевая, домовая"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "удали заметку"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != storage.BlockedMutationMsg || !result.System || result.NotesChanged {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := notes.Get("Мышки.md"); err != nil {
+		t.Fatalf("note should remain: %v", err)
+	}
+}
+
+func TestAgent_nothingFoundDeniedByHits(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Ничего не найдено"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Бренд-Tesla.md", "американские машины"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "что я писал про американские машины"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "Найдено: Бренд-Tesla.md" || !result.System {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestAgent_emptySearchReplacesHallucination(t *testing.T) {
 	step := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -130,8 +254,11 @@ func TestAgent_emptySearchReplacesModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Content != EmptySearchReply || !result.System {
+	if result.Content != EmptySearchMsg || !result.System {
 		t.Fatalf("result = %+v", result)
+	}
+	if len(result.Matches) != 0 {
+		t.Fatalf("matches = %+v", result.Matches)
 	}
 }
 
@@ -169,16 +296,10 @@ func TestAgent_readNotHiddenByEmptySearch(t *testing.T) {
 	}
 }
 
-func TestAgent_listAllUsesListed(t *testing.T) {
-	step := 0
+func TestAgent_repeatSearchReturnsCount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		step++
-		if step == 1 {
-			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"search_notes","arguments":{"query":""}}}]}}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"их пять"}}`))
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"search_notes","arguments":{"query":""}}}]}}`))
 	}))
 	defer srv.Close()
 
@@ -196,12 +317,12 @@ func TestAgent_listAllUsesListed(t *testing.T) {
 
 	agent := NewAgent(New(srv.URL, "m"), notes)
 	result, err := agent.Chat(context.Background(), []Message{
-		{Role: RoleUser, Content: "сколько заметок"},
+		{Role: RoleUser, Content: "сколько у меня заметок"},
 	}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(result.Content, "Всего заметок: 2") {
-		t.Fatalf("content = %q", result.Content)
+	if result.Content != "На диске заметок: 2." || !result.System {
+		t.Fatalf("result = %+v", result)
 	}
 }

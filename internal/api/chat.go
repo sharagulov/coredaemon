@@ -21,9 +21,10 @@ func MountChat(mux *http.ServeMux, agent *ai.Agent) {
 		defer r.Body.Close()
 
 		var req struct {
-			Message  string       `json:"message"`
-			Messages []ai.Message `json:"messages"`
-			Scope    string       `json:"scope"`
+			Message     string       `json:"message"`
+			Messages    []ai.Message `json:"messages"`
+			Scope       string       `json:"scope"`
+			Attachments []string     `json:"attachments"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -61,7 +62,7 @@ func MountChat(mux *http.ServeMux, agent *ai.Agent) {
 			if err := stream.Send("status", p); err != nil {
 				log.Printf("chat: status stream: %v", err)
 			}
-		}, req.Scope)
+		}, req.Scope, ai.NormalizeAttachments(req.Attachments)...)
 		if err != nil {
 			log.Printf("chat: %v", err)
 			_ = stream.Send("error", map[string]string{"error": chatErrorMessage(err)})
@@ -90,7 +91,7 @@ func normalizeChatMessages(in []ai.Message) ([]ai.Message, error) {
 			continue
 		}
 		switch role {
-		case ai.RoleUser, ai.RoleAssistant:
+		case ai.RoleUser, ai.RoleAssistant, ai.RoleSystem:
 			out = append(out, ai.Message{Role: role, Content: content})
 		default:
 			return nil, errors.New("invalid message role")

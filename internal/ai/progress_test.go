@@ -39,16 +39,19 @@ func TestAgent_emitsProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"thinking", "created", "thinking"}
-	if len(phases) != len(want) {
+	if len(phases) == 0 || phases[0].Kind != "thinking" {
 		t.Fatalf("phases = %+v", phases)
 	}
-	for i, kind := range want {
-		if phases[i].Kind != kind {
-			t.Fatalf("phase[%d] = %+v, want kind %q", i, phases[i], kind)
+	var created []Phase
+	for _, p := range phases {
+		if p.Kind == "created" {
+			created = append(created, p)
 		}
 	}
-	if phases[1].File == "" || phases[1].Title != "T" {
-		t.Fatalf("created phase = %+v", phases[1])
+	if len(created) != 1 {
+		t.Fatalf("created phases = %+v", created)
+	}
+	if created[0].File == "" || created[0].Title != "T" {
+		t.Fatalf("created phase = %+v", created[0])
 	}
 }

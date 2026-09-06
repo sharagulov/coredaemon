@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -73,6 +74,50 @@ func TestChat_stream(t *testing.T) {
 	}
 }
 
+func TestNormalizeAttachments(t *testing.T) {
+	got := ai.NormalizeAttachments([]string{" Serebrovskaya Oblast.md ", "", "Serebrovskaya Oblast.md", "Носки.md"})
+	if len(got) != 2 || got[0] != "Serebrovskaya Oblast.md" || got[1] != "Носки.md" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestChat_attachments(t *testing.T) {
+	var seen []byte
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"пасмурность"}}`))
+	}))
+	defer ollama.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Serebrovskaya Oblast.md", "Климат: постоянная пасмурность."); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := ai.NewAgent(ai.New(ollama.URL, "m"), notes)
+	mux := http.NewServeMux()
+	MountChat(mux, agent)
+
+	body := bytes.NewBufferString(`{"message":"какой климат","attachments":["Serebrovskaya Oblast.md"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
+	rec := flushRecorder{httptest.NewRecorder()}
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(seen, []byte("постоянная пасмурность")) {
+		t.Fatalf("ollama request missing attached note: %s", bytes.TrimSpace(seen))
+	}
+	if bytes.Contains(seen, []byte("Контекст:")) {
+		t.Fatalf("text glue still present: %s", bytes.TrimSpace(seen))
+	}
+}
+
 func TestNormalizeChatMessages(t *testing.T) {
 	msgs, err := normalizeChatMessages([]ai.Message{
 		{Role: "user", Content: "hi"},
@@ -86,6 +131,14 @@ func TestNormalizeChatMessages(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when last message is not user")
+	}
+
+	msgs, err = normalizeChatMessages([]ai.Message{
+		{Role: "system", Content: "Создано: a.md"},
+		{Role: "user", Content: "допиши туда факт"},
+	})
+	if err != nil || len(msgs) != 2 || msgs[0].Role != ai.RoleSystem {
+		t.Fatalf("msgs = %+v, err = %v", msgs, err)
 	}
 }
 

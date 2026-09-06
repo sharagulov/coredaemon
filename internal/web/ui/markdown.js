@@ -12,6 +12,14 @@ function stripToolMarkup(text) {
     .trim();
 }
 
+function stripNoteFileLinks(text) {
+  return text
+    .replace(/\[([^\]]*)\]\(([^)\s]+\.md)\)/gi, "")
+    .replace(/^[ \t]*Ссылка на заметку[^\n]*$/gim, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function langLabel(raw) {
   const s = (raw || "").trim();
   if (!s) return "Code";
@@ -99,8 +107,9 @@ function renderLine(line) {
   return row;
 }
 
-export function renderMarkdown(el, text, { copyIcon = "assets/icon-copy.svg" } = {}) {
-  const source = stripToolMarkup(text || "");
+export function renderMarkdown(el, text, { copyIcon = "assets/icon-copy.svg", chat = false } = {}) {
+  let source = stripToolMarkup(text || "");
+  if (chat) source = stripNoteFileLinks(source);
   el.innerHTML = "";
   if (!source.trim()) {
     el.classList.add("md-preview--empty");

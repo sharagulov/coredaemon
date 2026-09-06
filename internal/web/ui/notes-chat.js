@@ -122,7 +122,7 @@ async function readChatStream(res, onEvent) {
   throw new Error("stream ended without result");
 }
 
-async function chatStream(messages, scope, onEvent, signal) {
+async function chatStream(messages, scope, attachments, onEvent, signal) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: {
@@ -131,14 +131,13 @@ async function chatStream(messages, scope, onEvent, signal) {
     },
     cache: "no-store",
     signal,
-    body: JSON.stringify({ messages, scope: scope || "" }),
+    body: JSON.stringify({
+      messages,
+      scope: scope || "",
+      attachments: attachments || [],
+    }),
   });
   return readChatStream(res, onEvent);
-}
-
-function contextSuffix(items) {
-  if (!items?.length) return "";
-  return `\n\nКонтекст: ${items.map((a) => a.path).join(", ")}`;
 }
 
 function emptyUndo() {
@@ -349,14 +348,14 @@ export function createNotesChat({
     composer.focus();
   }
 
+  // Facts the daemon reported go back as system messages: given them in the assistant
+  // voice the model copies the shape and invents reports like "Удалено: Мышки.md".
   function history() {
     return activeChat().messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({
-        role: m.role,
-        content: m.role === "user"
-          ? `${m.content}${contextSuffix(m.attachments)}`
-          : m.content,
+        role: isSystemMessage(m) ? "system" : m.role,
+        content: m.content,
       }));
   }
 
@@ -387,6 +386,9 @@ export function createNotesChat({
           turn.appendChild(createSystemMessage({
             content: msg.content,
             at: msg.at,
+            created: msg.created,
+            updated: msg.updated,
+            onOpenNote,
           }));
         } else {
           turn.appendChild(createBotMessage({
@@ -523,10 +525,16 @@ export function createNotesChat({
     render();
 
     try {
-      const res = await chatStream(history(), chat.scope || "", (phase) => {
-        applyPhaseUndo(turnUndo, phase);
-        onNoteEvent?.(phase);
-      }, abort.signal);
+      const res = await chatStream(
+        history(),
+        chat.scope || "",
+        attached.map((a) => a.path).filter(Boolean),
+        (phase) => {
+          applyPhaseUndo(turnUndo, phase);
+          onNoteEvent?.(phase);
+        },
+        abort.signal,
+      );
 
       if (!chat.messages.includes(userMsg)) return;
 

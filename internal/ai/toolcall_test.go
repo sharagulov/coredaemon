@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/core-daemon/core-daemon/internal/storage"
@@ -71,32 +73,60 @@ func TestNormalizeAssistant_mergesTextCalls(t *testing.T) {
 	}
 }
 
-func TestGroundedContent(t *testing.T) {
-	got := groundedContent("выдумал три заметки", groundArgs{searched: true})
-	if got != EmptySearchReply {
-		t.Fatalf("got %q", got)
+func TestEncodeToolResult_searchEmpty(t *testing.T) {
+	body := encodeToolResult("search_notes", storage.ToolResult{Status: "success", Query: "tasks"}, 22)
+	if !strings.Contains(string(body), `"hits":[]`) || !strings.Contains(string(body), `"found":0`) || !strings.Contains(string(body), `"vault":22`) {
+		t.Fatalf("body = %s", body)
 	}
-	if groundedContent("ok", groundArgs{}) != "ok" {
-		t.Fatal("passthrough")
+}
+
+func TestCleanReply_stripsFileLinks(t *testing.T) {
+	got := cleanReply("Созданы заметки:\n[Ссылка на Мышка 1](Мышка-1.md)\n[[Мышка 2]]\n[полевая](Мышь-полевая.md)")
+	if strings.Contains(got, "](") || strings.Contains(got, "[[") {
+		t.Fatalf("links left: %q", got)
 	}
-	if groundedContent("Заметка удалена", groundArgs{blocked: true}) != storage.BlockedMutationMsg {
-		t.Fatal("blocked should replace invented success")
+	if !strings.Contains(got, "полевая") || !strings.Contains(got, "Мышка 2") {
+		t.Fatalf("useful labels dropped: %q", got)
 	}
-	hits := []storage.SearchHit{{File: "dog.md"}}
-	if groundedContent("выдумал десять", groundArgs{searched: true, matches: hits}) != "Найдено: 1\n• dog.md" {
-		t.Fatal("search hits should replace model text")
+	if strings.Contains(strings.ToLower(got), "ссылка") {
+		t.Fatalf("link label kept: %q", got)
 	}
-	if groundedContent("пасмурность и дожди", groundArgs{
-		searched: true,
-		attached: true,
-		reads:    []readFact{{File: "oblast.md", Content: "Климат: пасмурность"}},
-	}) != "пасмурность и дожди" {
-		t.Fatal("attached note must keep the model answer")
+}
+
+func TestCleanReply_dropsBulletsLeftByLinks(t *testing.T) {
+	got := cleanReply("Готово:\n- [Ссылка на Мышь полевая](Мышь-полевая.md)\n- ![Ссылка](Мышь-домовая.md)\n1. [Ссылка](Мышь-летучая.md)")
+	if got != "Готово:" {
+		t.Fatalf("clean = %q", got)
 	}
-	if groundedContent("json dump", groundArgs{searched: true, matches: hits, found: 1, total: 72}) != "Найдено: 1 из 72\n• dog.md" {
-		t.Fatal("keyword search must show total on disk")
+	code := "Пример:\n```\nx = 1\n```"
+	if cleanReply(code) != code {
+		t.Fatalf("code fence broken: %q", cleanReply(code))
 	}
-	if groundedContent("пять", groundArgs{searched: true, listed: true, matches: hits, found: 72}) != "Всего заметок: 72\n• dog.md" {
-		t.Fatal("list-all must use found as total")
+}
+
+func TestClaimsMutation(t *testing.T) {
+	for _, s := range []string{"Удалено: Мышки.md", "Заметка удалена", "Я перенёс заметку в архив"} {
+		if !claimsMutation(s) {
+			t.Fatalf("missed claim: %q", s)
+		}
+	}
+	for _, s := range []string{
+		"Ты перенёс вещи в гараж",
+		"Удаление заметок недоступно",
+		"Удалить заметку можно вручную",
+		"Создано: a.md",
+	} {
+		if claimsMutation(s) {
+			t.Fatalf("false claim: %q", s)
+		}
+	}
+}
+
+func TestToolKey_normalizesEmptySearch(t *testing.T) {
+	a := toolKey("search_notes", json.RawMessage(`{}`))
+	b := toolKey("search_notes", json.RawMessage(`{"query":"*"}`))
+	c := toolKey("search_notes", json.RawMessage(`{"query":""}`))
+	if a != b || b != c {
+		t.Fatalf("keys = %q %q %q", a, b, c)
 	}
 }

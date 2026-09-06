@@ -36,7 +36,7 @@ notes/              — пользовательские данные (gitignore
 
 ## AI и инструменты
 
-- Модель по умолчанию: `qwen2.5:7b` (слабая в tool calling). **Не доверять тексту модели** — истина на диске и в результатах tools.
+- Модель по умолчанию: `qwen2.5-coder:14b`. **Не доверять тексту модели** — истина на диске и в результатах tools.
 - Разрешённые tools: `create_note`, `append_to_note`, `read_note`, `search_notes`.
 - **Удаление/перенос/корзина — только через UI**, не через модель. На запрос удалить — отказ «в целях безопасности».
 - После tools: факты в UI только из `status: success` (`created`, `updated`, `matches`).
@@ -73,5 +73,5 @@ notes/              — пользовательские данные (gitignore
 
 ## Конфиг
 
-- `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_MODEL` (default `qwen2.5:7b`).
+- `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_MODEL` (default `qwen2.5-coder:14b`).
 - Сервер: `:8080`. `defer notes.Close()` при старте.

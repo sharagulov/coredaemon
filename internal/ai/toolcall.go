@@ -11,6 +11,17 @@ var (
 	toolCallBlock = regexp.MustCompile(`(?is)<tool_call>\s*(.*?)\s*</tool_call>`)
 	toolCallTag   = regexp.MustCompile(`(?i)</?tool_call>`)
 	toolCallOpen  = regexp.MustCompile(`(?i)<tool_call>`)
+	markdownLink  = regexp.MustCompile(`!?\[([^\[\]]*)\]\([^)]*\)`)
+	wikiLink      = regexp.MustCompile(`\[\[([^\[\]]+)\]\]`)
+	linkOnlyLine  = regexp.MustCompile(`(?m)^[ \t]*Ссылка на[^\n]*\n?`)
+	// letterlessLine matches a line without letters, e.g. the "- " left by a stripped link.
+	// Backticks are excluded so code fences survive.
+	letterlessLine = regexp.MustCompile("(?m)^[^\\p{L}\n`]+$\n?")
+	// doneMutation matches a finished delete or move, e.g. the "Удалено: Мышки.md" the model
+	// copies from earlier "Создано: …" reports. Nouns stay out of it, so an honest
+	// "удаление недоступно" reaches the user as the model wrote it.
+	doneMutation = regexp.MustCompile(`(?i)удалил|переместил|перен[её]с|(?:удал|перемещ|перенес)[ёе]н[аоы]?(?:$|[^\p{L}])`)
+	extraBlank   = regexp.MustCompile(`\n{3,}`)
 )
 
 var textToolNames = map[string]bool{
@@ -185,6 +196,48 @@ func makeTextCall(name string, args json.RawMessage) ToolCall {
 			Arguments: normalizeArgs(args),
 		},
 	}
+}
+
+func cleanReply(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = markdownLink.ReplaceAllStringFunc(s, func(m string) string {
+		sub := markdownLink.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return ""
+		}
+		label := strings.TrimSpace(sub[1])
+		if label == "" {
+			return ""
+		}
+		if strings.HasPrefix(strings.ToLower(label), "ссылка") {
+			return ""
+		}
+		return label
+	})
+	s = wikiLink.ReplaceAllString(s, "$1")
+	s = linkOnlyLine.ReplaceAllString(s, "")
+	s = letterlessLine.ReplaceAllString(s, "")
+	s = extraBlank.ReplaceAllString(s, "\n\n")
+	return strings.TrimSpace(s)
+}
+
+// claimsMutation reports whether the reply announces a delete or move of a note. Deletion
+// never runs through the model, so such a reply is false whenever the vault stayed untouched.
+// The note mention keeps retold note bodies ("перенёс вещи в гараж") out of the check.
+func claimsMutation(s string) bool {
+	if !doneMutation.MatchString(s) {
+		return false
+	}
+	low := strings.ToLower(s)
+	return strings.Contains(low, ".md") || strings.Contains(low, "заметк")
+}
+
+// claimsNothingFound reports whether the reply denies hits the tools actually returned.
+func claimsNothingFound(s string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(EmptySearchMsg))
 }
 
 func stripToolMarkup(content string) string {

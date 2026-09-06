@@ -1472,6 +1472,7 @@ body[data-screen="notes"] {
   color: #888;
   font-size: 13px;
   line-height: 1.5;
+  white-space: pre-line;
 }
 
 .notes-chat__actions {
@@ -1548,6 +1549,15 @@ span.notes-chat__pill {
 .notes-chat__chip:hover {
   background: #171717;
   color: #fff;
+}
+
+.notes-chat__user .notes-chat__chip {
+  cursor: default;
+}
+
+.notes-chat__user .notes-chat__chip:hover {
+  background: #111;
+  color: #999;
 }
 
 .notes-chat__chip-icon,

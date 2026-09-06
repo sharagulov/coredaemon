@@ -2,7 +2,9 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,6 +39,35 @@ func TestClient_ChatOnce(t *testing.T) {
 	}
 }
 
+func TestClient_ChatOnce_pinsSampling(t *testing.T) {
+	var got struct {
+		Options struct {
+			Temperature float64 `json:"temperature"`
+			NumCtx      int     `json:"num_ctx"`
+		} `json:"options"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"ok"}}`))
+	}))
+	defer srv.Close()
+
+	if _, err := New(srv.URL, "m").ChatOnce(context.Background(), []Message{
+		{Role: RoleUser, Content: "hi"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got.Options.Temperature != 0 {
+		t.Fatalf("temperature = %v", got.Options.Temperature)
+	}
+	if got.Options.NumCtx < 8192 {
+		t.Fatalf("num_ctx = %d", got.Options.NumCtx)
+	}
+}
+
 func TestAgent_toolLoop(t *testing.T) {
 	step := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +77,7 @@ func TestAgent_toolLoop(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"create_note","arguments":{"title":"Tasks","content":"buy milk"}}}]}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Создал заметку tasks.md"}}`))
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"[Ссылка на Tasks](Tasks.md)"}}`))
 	}))
 	defer srv.Close()
 
@@ -66,9 +97,6 @@ func TestAgent_toolLoop(t *testing.T) {
 	if !result.NotesChanged {
 		t.Fatal("expected notes_changed")
 	}
-	if result.Content == "" {
-		t.Fatal("expected content")
-	}
 
 	list, err := notes.List()
 	if err != nil || len(list) != 1 {
@@ -76,6 +104,9 @@ func TestAgent_toolLoop(t *testing.T) {
 	}
 	if len(result.Created) != 1 || result.Created[0] != list[0].Name {
 		t.Fatalf("created = %v, file = %q", result.Created, list[0].Name)
+	}
+	if result.Content != "Создано: "+list[0].Name || !result.System {
+		t.Fatalf("content = %q system = %v", result.Content, result.System)
 	}
 }
 
@@ -114,6 +145,82 @@ func TestAgent_textToolCallCreatesNote(t *testing.T) {
 	list, err := notes.List()
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+}
+
+func TestAgent_createsEveryNoteAcrossTurns(t *testing.T) {
+	titles := []string{"Мышь полевая", "Мышь домовая", "Мышь летучая"}
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if step < len(titles) {
+			call := fmt.Sprintf(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"create_note","arguments":{"title":%q,"content":"описание"}}}]}}`, titles[step])
+			step++
+			_, _ = w.Write([]byte(call))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"готово"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "создай три заметки про мышек"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Created) != len(titles) {
+		t.Fatalf("created = %v, want %d files", result.Created, len(titles))
+	}
+	list, err := notes.List()
+	if err != nil || len(list) != len(titles) {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+	for _, file := range result.Created {
+		if !strings.Contains(result.Content, file) {
+			t.Fatalf("content %q omits %q", result.Content, file)
+		}
+	}
+}
+
+func TestAgent_createsEveryNoteInOneTurn(t *testing.T) {
+	step := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		step++
+		if step == 1 {
+			_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"create_note","arguments":{"title":"Мышь полевая","content":"a"}}},{"type":"function","function":{"name":"create_note","arguments":{"title":"Мышь домовая","content":"b"}}},{"type":"function","function":{"name":"create_note","arguments":{"title":"Мышь летучая","content":"c"}}}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"[Ссылка](a.md)"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "создай три заметки про мышек"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Created) != 3 || !result.System {
+		t.Fatalf("result = %+v", result)
+	}
+	if strings.Contains(result.Content, "[") {
+		t.Fatalf("markdown leaked: %q", result.Content)
 	}
 }
 

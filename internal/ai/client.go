@@ -27,11 +27,21 @@ func New(baseURL, model string) *Client {
 	}
 }
 
+// chatOptions pin Ollama sampling: greedy decoding keeps tool-call JSON well-formed and
+// makes the same question give the same answer, and num_ctx above the 4096 default keeps
+// the system prompt from being shifted out once attachments and tool results pile up.
+var chatOptions = map[string]any{
+	"temperature": 0,
+	"top_p":       0.9,
+	"num_ctx":     8192,
+}
+
 type chatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Tools    []Tool    `json:"tools,omitempty"`
-	Stream   bool      `json:"stream"`
+	Model    string         `json:"model"`
+	Messages []Message      `json:"messages"`
+	Tools    []Tool         `json:"tools,omitempty"`
+	Stream   bool           `json:"stream"`
+	Options  map[string]any `json:"options"`
 }
 
 type chatResponse struct {
@@ -45,6 +55,7 @@ func (c *Client) ChatOnce(ctx context.Context, messages []Message, tools []Tool)
 		Messages: messages,
 		Tools:    tools,
 		Stream:   false,
+		Options:  chatOptions,
 	})
 	if err != nil {
 		return Message{}, fmt.Errorf("encode request: %w", err)

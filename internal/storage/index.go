@@ -12,12 +12,11 @@ import (
 )
 
 const (
-	indexFileName      = ".index.db"
-	maxSearchQuery     = 200
-	searchHitLimit     = 8
-	uiSearchHitLimit   = 50
-	listNotesToolLimit = 200
-	snippetTokens      = 15
+	indexFileName    = ".index.db"
+	maxSearchQuery   = 200
+	searchHitLimit   = 8
+	uiSearchHitLimit = 50
+	snippetTokens    = 15
 )
 
 // SearchHit is one FTS match returned to the model.
@@ -209,8 +208,13 @@ func ftsQuery(q string) string {
 	return strings.Join(ftsTerms(q), " ")
 }
 
+// Searchable reports whether q has FTS terms after stemming and stopwords.
+func Searchable(q string) bool {
+	return len(ftsTerms(q)) > 0
+}
+
 func ftsTerms(q string) []string {
-	q = strings.TrimSpace(q)
+	q = foldLookalikes(strings.TrimSpace(q))
 	if q == "" {
 		return nil
 	}
@@ -221,6 +225,7 @@ func ftsTerms(q string) []string {
 	var parts []string
 	seen := map[string]struct{}{}
 	for _, word := range strings.Fields(q) {
+		word = strings.TrimSuffix(strings.ToLower(word), ".md")
 		var b strings.Builder
 		for _, r := range word {
 			if unicode.IsLetter(r) || unicode.IsNumber(r) {

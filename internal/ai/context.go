@@ -2,84 +2,19 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
-	"unicode"
+
+	"github.com/core-daemon/core-daemon/internal/storage"
 )
 
-func lastUserText(messages []Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == RoleUser {
-			return messages[i].Content
-		}
-	}
-	return ""
-}
-
-func contextFiles(messages []Message) []string {
-	text := lastUserText(messages)
-	if text == "" {
-		return nil
-	}
-	head := text
-	var names []string
-	if i := strings.Index(text, "\n\nКонтекст:"); i >= 0 {
-		head = text[:i]
-		for _, part := range strings.Split(text[i+len("\n\nКонтекст:"):], ",") {
-			if name := strings.TrimSpace(part); name != "" {
-				names = append(names, name)
-			}
-		}
-	}
-	names = append(names, mdNamesIn(head)...)
-	return uniqNames(names)
-}
-
-func mdNamesIn(text string) []string {
-	var names []string
-	var b strings.Builder
-	flush := func() {
-		name := strings.TrimSpace(b.String())
-		b.Reset()
-		if strings.HasSuffix(strings.ToLower(name), ".md") {
-			names = append(names, name)
-		}
-	}
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '.' || r == '-' || r == '_' || r == '/' {
-			b.WriteRune(r)
-			continue
-		}
-		flush()
-	}
-	flush()
-	return names
-}
-
-func uniqNames(names []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		key := strings.ToLower(name)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
-
-func (a *Agent) loadAttachedNotes(scope string, messages []Message) (string, bool) {
-	names := contextFiles(messages)
+func (a *Agent) loadAttachedNotes(scope string, names []string) (string, bool) {
+	names = NormalizeAttachments(names)
 	if len(names) == 0 {
 		return "", false
 	}
 	var b strings.Builder
-	b.WriteString("Текст заметок с диска. Отвечай только по нему.\n")
+	b.WriteString("Текст прикреплённых заметок с диска:\n")
 	loaded := false
 	for _, name := range names {
 		args, err := json.Marshal(map[string]string{"filename": name})
@@ -106,4 +41,115 @@ func (a *Agent) loadAttachedNotes(scope string, messages []Message) (string, boo
 		return "", false
 	}
 	return b.String(), true
+}
+
+func (a *Agent) vaultTotal(scope string) int {
+	list, err := a.notes.List()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, note := range list {
+		if storage.NoteMatchesScope(note.Section, note.Important, scope) {
+			n++
+		}
+	}
+	return n
+}
+
+func (a *Agent) vaultCount(scope string) string {
+	return fmt.Sprintf("На диске заметок: %d.", a.vaultTotal(scope))
+}
+
+func isVaultCountQuery(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, "ё", "е")
+	hasCount := strings.Contains(s, "сколько") || strings.Contains(s, "количество")
+	return hasCount && strings.Contains(s, "замет")
+}
+
+func writeFact(created, updated []string) string {
+	var lines []string
+	if files := uniqueFiles(created); len(files) > 0 {
+		lines = append(lines, "Создано: "+strings.Join(files, ", "))
+	}
+	if files := uniqueFiles(updated); len(files) > 0 {
+		lines = append(lines, "Дополнено: "+strings.Join(files, ", "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func uniqueFiles(files []string) []string {
+	out := make([]string, 0, len(files))
+	seen := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		out = append(out, f)
+	}
+	return out
+}
+
+// searchFact reports found files when the model left no usable text of its own.
+func searchFact(matches []storage.SearchHit) string {
+	files := make([]string, 0, len(matches))
+	for _, h := range matches {
+		if h.File != "" {
+			files = append(files, h.File)
+		}
+	}
+	if len(files) == 0 {
+		return ""
+	}
+	return "Найдено: " + strings.Join(files, ", ")
+}
+
+func lastUserText(msgs []Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleUser {
+			return msgs[i].Content
+		}
+	}
+	return ""
+}
+
+func (a *Agent) loadSearchContext(scope, query string) (string, []storage.SearchHit, bool) {
+	if !storage.Searchable(query) {
+		return "", nil, false
+	}
+	args, err := json.Marshal(map[string]string{"query": query})
+	if err != nil {
+		return "", nil, false
+	}
+	res, err := a.notes.RunToolScoped("search_notes", args, scope)
+	if err != nil || res.Status != "success" {
+		return "", nil, false
+	}
+	hits := res.Hits
+	if hits == nil {
+		hits = []storage.SearchHit{}
+	}
+	if len(hits) == 0 {
+		return "", hits, false
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Поиск по сообщению пользователя, found: %d:\n", len(hits))
+	for _, h := range hits {
+		b.WriteString("• ")
+		b.WriteString(h.File)
+		if snip := stripSnippetTags(h.Snippet); snip != "" {
+			b.WriteString(" — ")
+			b.WriteString(snip)
+		}
+		b.WriteString("\n")
+	}
+	return b.String(), hits, true
+}
+
+func stripSnippetTags(s string) string {
+	s = strings.ReplaceAll(s, "<b>", "")
+	s = strings.ReplaceAll(s, "</b>", "")
+	return strings.TrimSpace(s)
 }

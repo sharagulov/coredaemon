@@ -19,7 +19,7 @@ func main() {
 	defer notes.Close()
 
 	ollamaURL := envOr("OLLAMA_URL", "http://localhost:11434")
-	ollamaModel := envOr("OLLAMA_MODEL", "qwen2.5:7b")
+	ollamaModel := envOr("OLLAMA_MODEL", "qwen2.5-coder:14b")
 	llm := ai.New(ollamaURL, ollamaModel)
 	agent := ai.NewAgent(llm, notes)
 

@@ -115,3 +115,19 @@ func TestDisplayTitle(t *testing.T) {
 		t.Fatalf("nested filename title = %q", got)
 	}
 }
+
+func TestCreateNote_rejectsHan(t *testing.T) {
+	n := openTest(t)
+	res, err := n.RunTool("create_note", []byte(`{"title":"Мышки","content":"Мышки - это小型啮齿动物"}`))
+	if err != nil || res.Status != "error" || res.Error != "текст заметки должен быть на русском" {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
+	if list, err := n.List(); err != nil || len(list) != 0 {
+		t.Fatalf("note should not be written: %+v %v", list, err)
+	}
+
+	ok, err := n.RunTool("create_note", []byte(`{"title":"Мышки","content":"Мышки — грызуны."}`))
+	if err != nil || ok.Status != "success" || ok.File != "Мышки.md" {
+		t.Fatalf("russian create = %+v, err = %v", ok, err)
+	}
+}
