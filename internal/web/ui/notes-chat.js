@@ -258,6 +258,7 @@ export function createNotesChat({
     getActiveId: () => store.activeId,
     onSelect: switchChat,
     onNew: startNewChat,
+    onDelete: (id) => { deleteChat(id).catch(() => {}); },
   });
 
   const composer = createChatComposer({
@@ -387,6 +388,30 @@ export function createNotesChat({
     store.activeId = chat.id;
     if (store.chats.length > MAX_CHATS) store.chats.pop();
     persist();
+    render();
+  }
+
+  async function deleteChat(id) {
+    if (!ready) return;
+    const idx = store.chats.findIndex((c) => c.id === id);
+    if (idx === -1) return;
+
+    if (sending && store.activeId === id) {
+      stopGenerating();
+      await sendGate;
+    }
+
+    store.chats.splice(idx, 1);
+    if (!store.chats.length) {
+      const chat = emptyChat();
+      store.chats = [chat];
+      store.activeId = chat.id;
+    } else if (store.activeId === id) {
+      store.activeId = store.chats[Math.min(idx, store.chats.length - 1)].id;
+    }
+
+    header.closeMenu();
+    await persist();
     render();
   }
 

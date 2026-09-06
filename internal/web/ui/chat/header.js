@@ -1,7 +1,8 @@
 import { el, icon } from "../dom.js";
 import { createDropdown } from "../dropdown.js";
-import { createMenuOption, syncMenuOptions } from "../menu-option.js";
+import { syncMenuOptions } from "../menu-option.js";
 import { createChatIconButton } from "./icon-btn.js";
+import { createChatOption } from "./chat-option.js";
 
 /**
  * @param {{
@@ -9,9 +10,10 @@ import { createChatIconButton } from "./icon-btn.js";
  *   getActiveId: () => string,
  *   onSelect: (id: string) => void,
  *   onNew: () => void,
+ *   onDelete: (id: string) => void,
  * }} opts
  */
-export function createChatHeader({ getChats, getActiveId, onSelect, onNew }) {
+export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDelete }) {
   const header = el("header", "notes-chat__header");
   const wrap = el("div", "notes-chat__title-wrap");
 
@@ -55,12 +57,11 @@ export function createChatHeader({ getChats, getActiveId, onSelect, onNew }) {
       titleMenu.innerHTML = "";
       const activeId = getActiveId();
       for (const chat of getChats()) {
-        titleMenu.appendChild(createMenuOption({
-          className: "notes-chat__option",
+        titleMenu.appendChild(createChatOption({
           id: chat.id,
           label: chat.title,
           active: chat.id === activeId,
-          dataKey: "id",
+          onDelete,
         }));
       }
       syncMenuOptions(titleMenu, ".notes-chat__option", activeId, "id");

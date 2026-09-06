@@ -11,6 +11,7 @@ import {
   createContextAction,
   registerPopupDismiss,
   createMarkdownEditor,
+  createNoteSectionPicker,
   createNotesChat,
 } from "./ui/index.js";
 
@@ -93,8 +94,17 @@ const FILTER_STORAGE_KEY = "notes-filter";
     ];
   }
 
+  function sectionPickerTargets() {
+    return [
+      { id: "", label: "Без раздела" },
+      ...sectionMoveTargets(),
+    ];
+  }
+
   function noteMatchesSection(note, sectionId) {
-    return sectionId === "important" ? !!note?.important : note?.section === sectionId;
+    if (sectionId === "important") return !!note?.important;
+    if (sectionId === "") return !note?.important && !note?.section;
+    return note?.section === sectionId;
   }
 
   function appendFilterOption(menu, { id, label, deletable = false }) {
@@ -117,6 +127,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
 
   let sortDropdown;
   let filterDropdown;
+  let sectionPicker;
   let contextMenu;
   let searchControl;
 
@@ -131,6 +142,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
   function dismissOtherPopups(except) {
     if (except !== "sort") closeSortMenu();
     if (except !== "filter") closeFilterMenu();
+    if (except !== "section") closeSectionMenu();
     if (except !== "ctx") closeContextMenu();
   }
 
@@ -335,6 +347,30 @@ const FILTER_STORAGE_KEY = "notes-filter";
     state.filterCreating = false;
   }
 
+  function closeSectionMenu() {
+    sectionPicker?.close();
+  }
+
+  function noteSectionLabel(note) {
+    if (!note) return "Без раздела";
+    if (note.important) return "Важные";
+    if (note.section) {
+      const sec = state.sections.find((s) => s.id === note.section);
+      return sec?.name || "Без раздела";
+    }
+    return "Без раздела";
+  }
+
+  function noteSectionActiveId(note) {
+    if (!note) return "";
+    if (note.important) return "important";
+    return note.section || "";
+  }
+
+  function updateNoteSectionPicker() {
+    sectionPicker?.sync();
+  }
+
   function setFilterBy(id) {
     state.filterBy = id;
     state.filterCreating = false;
@@ -433,6 +469,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
       }
     }
     updateFilterLabel();
+    updateNoteSectionPicker();
   }
 
   function initFilterMenu() {
@@ -451,6 +488,24 @@ const FILTER_STORAGE_KEY = "notes-filter";
       onSelect: setFilterBy,
     });
     updateFilterLabel();
+  }
+
+  function initNoteSectionPicker() {
+    const bar = document.querySelector(".notes-editor__titlebar");
+    if (!bar) return;
+    sectionPicker = createNoteSectionPicker({
+      getLabel: () => noteSectionLabel(state.active),
+      getTargets: sectionPickerTargets,
+      getActiveId: () => noteSectionActiveId(state.active),
+      isDisabled: () => !state.active?.name || state.view === "trash",
+      onSelect: (id) => {
+        if (!state.active?.name) return;
+        moveNoteTo(state.active.name, id).catch(showError);
+      },
+      onOpen: () => dismissOtherPopups("section"),
+    });
+    bar.appendChild(sectionPicker.el);
+    sectionPicker.sync();
   }
 
   function compareNames(a, b) {
@@ -698,6 +753,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     els.readerEmpty.hidden = false;
     if (els.readerFoot) els.readerFoot.hidden = true;
     setEditorTitle("", false);
+    updateNoteSectionPicker();
     if (noteEditor) {
       noteEditor.setContent("");
       noteEditor.setReadOnly(false);
@@ -709,6 +765,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     els.readerPanel.hidden = false;
     if (els.readerFoot) els.readerFoot.hidden = !(readOnly && state.view === "trash");
     setEditorTitle(title, readOnly);
+    updateNoteSectionPicker();
     noteEditor.setReadOnly(readOnly);
     noteEditor.setContent(content || "");
     if (!readOnly) noteEditor.focus();
@@ -812,6 +869,8 @@ const FILTER_STORAGE_KEY = "notes-filter";
     let patch;
     if (target === "important") {
       patch = { important: true, section: "" };
+    } else if (target === "") {
+      patch = { section: "", important: false };
     } else {
       patch = { section: target, important: false };
     }
@@ -880,6 +939,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     registerPopupDismiss([
       { rootSelector: ".notes-sort", close: closeSortMenu },
       { rootSelector: ".notes-filter", close: closeFilterMenu },
+      { rootSelector: ".notes-editor__section", close: closeSectionMenu },
       { rootSelector: ".notes-ctx", close: closeContextMenu },
       { rootSelector: ".notes-chat__title-wrap", close: notesChat.closeMenus },
       { rootSelector: ".notes-chat__attach-wrap", close: notesChat.closeMenus },
@@ -1028,6 +1088,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
   }
   initSortMenu();
   initFilterMenu();
+  initNoteSectionPicker();
   initSearch();
   initContextMenu();
   initPopupDismiss();
