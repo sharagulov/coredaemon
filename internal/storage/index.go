@@ -107,6 +107,7 @@ func (n *Notes) rebuildIndex() error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit index rebuild: %w", err)
 	}
+	n.markIndexed()
 	return nil
 }
 
@@ -120,6 +121,7 @@ func (n *Notes) upsertIndex(name, content string) error {
 	if _, err := n.db.Exec(`INSERT INTO notes_fts(filepath, title, content) VALUES (?, ?, ?)`, name, foldYo(indexTitle(name, content)), foldYo(content)); err != nil {
 		return fmt.Errorf("index insert %q: %w", name, err)
 	}
+	n.markIndexed()
 	return nil
 }
 
@@ -130,6 +132,7 @@ func (n *Notes) removeIndex(name string) error {
 	if _, err := n.db.Exec(`DELETE FROM notes_fts WHERE filepath = ?`, name); err != nil {
 		return fmt.Errorf("index delete %q: %w", name, err)
 	}
+	n.markIndexed()
 	return nil
 }
 
@@ -282,18 +285,42 @@ func (n *Notes) syncIndex() error {
 	if n.db == nil {
 		return nil
 	}
-	list, err := n.List()
+	stamp, err := n.indexStamp()
 	if err != nil {
 		return err
 	}
-	var indexed int
-	if err := n.db.QueryRow(`SELECT count(*) FROM notes_fts`).Scan(&indexed); err != nil {
-		return fmt.Errorf("count index: %w", err)
-	}
-	if indexed == len(list) {
+	if stamp == n.stamp {
 		return nil
 	}
 	return n.rebuildIndex()
+}
+
+// indexStamp fingerprints the notes dir by file count and newest mtime. Frontmatter can carry
+// a stale "modified" field, so the stamp reads the filesystem instead of note metadata.
+func (n *Notes) indexStamp() (string, error) {
+	count := 0
+	var newest int64
+	err := n.walkNotes(func(rel, abs string) error {
+		st, err := os.Stat(abs)
+		if err != nil {
+			return fmt.Errorf("stat note %q: %w", rel, err)
+		}
+		count++
+		if mod := st.ModTime().UnixNano(); mod > newest {
+			newest = mod
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d:%d", count, newest), nil
+}
+
+func (n *Notes) markIndexed() {
+	if stamp, err := n.indexStamp(); err == nil {
+		n.stamp = stamp
+	}
 }
 
 func indexTitle(rel, body string) string {

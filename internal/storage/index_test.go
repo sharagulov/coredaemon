@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func openTest(t *testing.T) *Notes {
@@ -15,6 +16,35 @@ func openTest(t *testing.T) *Notes {
 	}
 	t.Cleanup(func() { _ = n.Close() })
 	return n
+}
+
+func TestSearch_seesExternalEdit(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("dog.md", "Шарик — собака"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.Search("шарик"); err != nil {
+		t.Fatal(err)
+	}
+
+	// правка мимо Save — так пишет Obsidian
+	file := filepath.Join(n.dir, "dog.md")
+	if err := os.WriteFile(file, []byte("Мурзик — кот\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(file, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err := n.Search("мурзик")
+	if err != nil || len(hits) != 1 || hits[0].File != "dog.md" {
+		t.Fatalf("new text not indexed: %+v, err = %v", hits, err)
+	}
+	stale, err := n.Search("шарик")
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("stale text still indexed: %+v, err = %v", stale, err)
+	}
 }
 
 func TestSearch_findsSavedNote(t *testing.T) {

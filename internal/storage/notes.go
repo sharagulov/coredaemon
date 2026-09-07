@@ -54,8 +54,9 @@ type NoteMetaInput struct {
 
 // Notes reads and writes .md files in dir and keeps an FTS5 search index.
 type Notes struct {
-	dir string
-	db  *sql.DB
+	dir   string
+	db    *sql.DB
+	stamp string
 }
 
 // Open opens or creates the notes directory and builds the search index.
