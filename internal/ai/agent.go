@@ -326,6 +326,9 @@ func encodeToolResult(name string, result storage.ToolResult, vault int) []byte 
 		}{Status: result.Status, Hits: hits, Found: result.Found, Vault: vault, Query: result.Query})
 		return body
 	}
+	if name == "read_note" && result.Status == "success" {
+		result.Content = clipNote(result.Content)
+	}
 	body, _ := json.Marshal(result)
 	return body
 }

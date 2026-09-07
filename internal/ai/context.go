@@ -8,6 +8,18 @@ import (
 	"github.com/core-daemon/core-daemon/internal/storage"
 )
 
+// maxNoteChars caps one note injected into the prompt. num_ctx is 8192 tokens, so a 1 MiB
+// note would push the system prompt out of the window and the rules would stop working.
+const maxNoteChars = 6000
+
+func clipNote(body string) string {
+	runes := []rune(body)
+	if len(runes) <= maxNoteChars {
+		return body
+	}
+	return string(runes[:maxNoteChars]) + "\n… текст обрезан."
+}
+
 func (a *Agent) loadAttachedNotes(scope string, names []string) (string, bool) {
 	names = NormalizeAttachments(names)
 	if len(names) == 0 {
@@ -33,7 +45,7 @@ func (a *Agent) loadAttachedNotes(scope string, names []string) (string, bool) {
 		if body == "" {
 			b.WriteString("Заметка пустая.")
 		} else {
-			b.WriteString(body)
+			b.WriteString(clipNote(body))
 		}
 		b.WriteString("\n")
 	}

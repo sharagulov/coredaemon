@@ -13,6 +13,40 @@ import (
 	"github.com/core-daemon/core-daemon/internal/storage"
 )
 
+func TestAgent_clipsHugeAttachment(t *testing.T) {
+	var seen []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"ок"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Большая.md", strings.Repeat("текст ", 20000)); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	if _, err := agent.Chat(context.Background(), []Message{{
+		Role:    RoleUser,
+		Content: "перескажи",
+	}}, nil, "", "Большая.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(seen, []byte("текст обрезан")) {
+		t.Fatal("clip marker missing")
+	}
+	if len([]rune(string(seen))) > 30000 {
+		t.Fatalf("prompt too big: %d runes", len([]rune(string(seen))))
+	}
+}
+
 func TestNormalizeAttachments(t *testing.T) {
 	names := NormalizeAttachments([]string{" Serebrovskaya Oblast.md ", "Serebrovskaya Oblast.md", "", "Носки.md"})
 	if len(names) != 2 || names[0] != "Serebrovskaya Oblast.md" || names[1] != "Носки.md" {
