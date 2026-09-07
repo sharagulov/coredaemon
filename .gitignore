@@ -24,3 +24,6 @@ Thumbs.db
 
 # Editor toolchain
 internal/web/cm/node_modules/
+
+# Local task list (not for repo)
+TODO.md
