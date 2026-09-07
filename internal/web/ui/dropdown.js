@@ -47,6 +47,7 @@ export function createDropdown({
   });
 
   menu?.addEventListener("click", (e) => {
+    e.stopPropagation();
     const opt = e.target.closest(optionSelector);
     if (!opt) return;
     onSelect(opt.dataset[dataKey]);

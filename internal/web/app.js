@@ -14,6 +14,7 @@ import {
   createNoteSectionPicker,
   createNotesChat,
 } from "./ui/index.js";
+import { createDriveExplorer } from "./ui/drive/index.js";
 
 const FILTER_STORAGE_KEY = "notes-filter";
 
@@ -47,6 +48,8 @@ const FILTER_STORAGE_KEY = "notes-filter";
     filterLabel: document.querySelector(".notes-toolbar__filter-label"),
     filterMenu: document.querySelector(".notes-filter__menu"),
     notesCard: document.querySelector("[data-open=\"notes\"]"),
+    driveCard: document.querySelector("[data-open=\"drive\"]"),
+    driveHomeBtn: document.querySelector("[data-drive-home]"),
     readerEmpty: document.querySelector(".notes-reader__empty"),
     readerPanel: document.querySelector(".notes-reader__panel"),
     readerFoot: document.querySelector(".notes-reader__foot"),
@@ -567,12 +570,16 @@ const FILTER_STORAGE_KEY = "notes-filter";
       clearReader();
       return;
     }
+    if (screen === "drive") {
+      driveExplorer.reload();
+      return;
+    }
     setView("notes");
     Promise.all([loadSections(), loadNotes()]).catch(showError);
   }
 
   function goHome() {
-    if (notesRoute()) {
+    if (notesRoute() || driveRoute()) {
       history.pushState(null, "", "/");
     }
     applyScreen("home");
@@ -583,6 +590,17 @@ const FILTER_STORAGE_KEY = "notes-filter";
       history.pushState(null, "", "/notes");
     }
     applyScreen("notes");
+  }
+
+  function driveRoute() {
+    return location.pathname === "/drive" || location.hash === "#drive";
+  }
+
+  function goDrive() {
+    if (location.pathname !== "/drive") {
+      history.pushState(null, "", "/drive");
+    }
+    applyScreen("drive");
   }
 
   async function api(path, options) {
@@ -1085,10 +1103,19 @@ const FILTER_STORAGE_KEY = "notes-filter";
 
   /* Events */
 
+  const driveExplorer = createDriveExplorer({
+    crumbsHost: document.querySelector("[data-drive-crumbs]"),
+  });
+  const driveBody = document.querySelector(".drive-workspace__body");
+  if (driveBody) driveBody.appendChild(driveExplorer.el);
+
   if (els.notesCard) els.notesCard.addEventListener("click", goNotes);
+  if (els.driveCard) els.driveCard.addEventListener("click", goDrive);
   if (els.homeBtn) els.homeBtn.addEventListener("click", goHome);
+  if (els.driveHomeBtn) els.driveHomeBtn.addEventListener("click", goHome);
   window.addEventListener("popstate", () => {
-    applyScreen(notesRoute() ? "notes" : "home");
+    if (driveRoute()) applyScreen("drive");
+    else applyScreen(notesRoute() ? "notes" : "home");
   });
 
   if (els.addBtn) els.addBtn.addEventListener("click", () => createNote());
@@ -1248,4 +1275,5 @@ const FILTER_STORAGE_KEY = "notes-filter";
     applySaved();
   })();
 
-  if (notesRoute()) applyScreen("notes");
+  if (driveRoute()) applyScreen("drive");
+  else if (notesRoute()) applyScreen("notes");

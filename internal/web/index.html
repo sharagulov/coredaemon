@@ -13,6 +13,8 @@
   <script>
     if (location.pathname === "/notes" || location.hash === "#notes") {
       document.body.dataset.screen = "notes";
+    } else if (location.pathname === "/drive" || location.hash === "#drive") {
+      document.body.dataset.screen = "drive";
     }
   </script>
 
@@ -37,7 +39,7 @@
             </span>
             <span class="home__card-title">Заметки</span>
           </button>
-          <button type="button" class="home__card" disabled aria-label="Облако, пока недоступно">
+          <button type="button" class="home__card" data-open="drive">
             <span class="home__icon-wrap" aria-hidden="true">
               <span class="home__icon-slot">
                 <img class="home__icon" src="assets/icon-cloud.svg" alt="">
@@ -199,6 +201,21 @@
 
       <section class="notes-chat" aria-label="AI-помощник"></section>
     </div>
+  </div>
+
+  <div class="drive-workspace">
+    <header class="notes-header">
+      <div class="notes-header__nav">
+        <button type="button" class="notes-header__back" data-drive-home aria-label="В главное меню">
+          <span class="notes-header__chevron" aria-hidden="true">
+            <img src="assets/icon-chevron.png" alt="">
+          </span>
+          <span>Меню</span>
+        </button>
+        <nav class="drive-crumbs" data-drive-crumbs aria-label="Путь"></nav>
+      </div>
+    </header>
+    <div class="drive-workspace__body"></div>
   </div>
 
   <div class="notes-ctx" hidden aria-hidden="true">

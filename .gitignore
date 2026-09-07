@@ -8,6 +8,8 @@
 !/notes/.gitkeep
 /tasks/*
 !/tasks/.gitkeep
+/data/drive/*
+!/data/drive/.gitkeep
 
 # Go
 *.test

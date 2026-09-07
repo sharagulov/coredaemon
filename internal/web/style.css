@@ -65,11 +65,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-body[data-screen="home"] .notes-workspace {
+body[data-screen="home"] .notes-workspace,
+body[data-screen="home"] .drive-workspace {
   display: none;
 }
 
-body[data-screen="notes"] .home {
+body[data-screen="notes"] .home,
+body[data-screen="notes"] .drive-workspace {
+  display: none;
+}
+
+body[data-screen="drive"] .home,
+body[data-screen="drive"] .notes-workspace {
   display: none;
 }
 
@@ -289,8 +296,228 @@ body[data-screen="notes"] .home {
 
 /* Notes workspace */
 
-body[data-screen="notes"] {
+body[data-screen="notes"],
+body[data-screen="drive"] {
   background: #000;
+}
+
+.drive-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #000;
+}
+
+.drive-workspace__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.drive-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.drive-crumbs__seg {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #555;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.drive-crumbs__seg:hover,
+.drive-crumbs__seg.is-current {
+  color: #fff;
+}
+
+.drive-crumbs__sep {
+  color: #555;
+  font-size: 15px;
+}
+
+.drive-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.drive-explorer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 50px;
+  padding: 25px 50px 50px;
+  overflow: auto;
+  background: #111;
+}
+
+.drive-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.drive-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drive-add,
+.drive-sort {
+  position: relative;
+}
+
+.drive-add__menu {
+  left: 0;
+  right: auto;
+  min-width: 180px;
+}
+
+.drive-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  opacity: 0;
+}
+
+.drive-explorer.is-drop {
+  outline: 1px dashed #555;
+  outline-offset: -12px;
+}
+
+.drive-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 15px;
+  width: 100%;
+}
+
+.drive-grid__empty {
+  color: #555;
+  font-size: 15px;
+}
+
+.drive-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 140px;
+  height: 140px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 20px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  overflow: clip;
+}
+
+.drive-tile:hover,
+.drive-tile.is-selected {
+  background: #202020;
+}
+
+.drive-tile__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  overflow: clip;
+  opacity: 0.25;
+}
+
+.drive-tile__icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.drive-tile__name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  color: #fff;
+}
+
+.drive-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 591px;
+  width: 591px;
+  min-width: 0;
+  background: #000;
+  border-left: 1px solid #202020;
+  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.08);
+}
+
+.drive-preview__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #111;
+  border-bottom: 1px solid #222;
+}
+
+.drive-preview__spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.drive-preview__tag {
+  color: #555;
+  cursor: default;
+}
+
+.drive-preview__tag.notes-bar--dropdown:hover {
+  background: #171717;
+}
+
+.drive-preview__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #111;
+  overflow: hidden;
+}
+
+.drive-preview__media {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }
 
 .notes-workspace {

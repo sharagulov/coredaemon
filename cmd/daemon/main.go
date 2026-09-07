@@ -21,6 +21,13 @@ func main() {
 	}
 	defer notes.Close()
 
+	drive, err := storage.OpenDrive("data/drive")
+	if err != nil {
+		log.Fatalf("drive: %v", err)
+	}
+	defer drive.Close()
+	drive.StartBackgroundScan()
+
 	ollamaURL := envOr("OLLAMA_URL", "http://localhost:11434")
 	ollamaModel := envOr("OLLAMA_MODEL", "qwen2.5-coder:14b")
 	llm := ai.New(ollamaURL, ollamaModel)
@@ -36,9 +43,10 @@ func main() {
 	api.MountChats(mux, notes)
 	api.MountModels(mux, agent)
 	api.MountChat(mux, agent)
+	api.MountDrive(mux, drive)
 	web.Mount(mux)
 
-	log.Printf("listening on :8080 (ollama %s, model %s)", ollamaURL, ollamaModel)
+	log.Printf("listening on :8080 (ollama %s, model %s, drive data/drive)", ollamaURL, ollamaModel)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }
 
