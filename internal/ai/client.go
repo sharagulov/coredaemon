@@ -27,6 +27,13 @@ func New(baseURL, model string) *Client {
 	}
 }
 
+func (c *Client) Model() string {
+	if c == nil {
+		return ""
+	}
+	return c.model
+}
+
 // chatOptions pin Ollama sampling: greedy decoding keeps tool-call JSON well-formed and
 // makes the same question give the same answer, and num_ctx above the 4096 default keeps
 // the system prompt from being shifted out once attachments and tool results pile up.

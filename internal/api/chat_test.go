@@ -188,4 +188,98 @@ func TestChatErrorMessage(t *testing.T) {
 	if got := chatErrorMessage(errors.New("tool loop exceeded 8 turns")); got != "агент слишком долго вызывал инструменты" {
 		t.Fatalf("loop = %q", got)
 	}
+	if got := chatErrorMessage(ai.ErrOpenAIUnavailable); got != "OpenAI не настроена: задай OPENAI_API_KEY" {
+		t.Fatalf("openai = %q", got)
+	}
+}
+
+func TestModels_listsProviders(t *testing.T) {
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := ai.NewAgent(ai.New("http://127.0.0.1:1", "qwen"), notes)
+	mux := http.NewServeMux()
+	MountModels(mux, agent)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"id":"ollama"`) || !strings.Contains(body, `"id":"openai"`) {
+		t.Fatalf("body = %s", body)
+	}
+	if !strings.Contains(body, `"qwen"`) {
+		t.Fatalf("missing ollama model: %s", body)
+	}
+}
+
+func TestChat_openaiProviderWithoutKey(t *testing.T) {
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := ai.NewAgent(ai.New("http://127.0.0.1:1", "m"), notes)
+	mux := http.NewServeMux()
+	MountChat(mux, agent)
+
+	body := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}],"provider":"openai"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
+	rec := flushRecorder{httptest.NewRecorder()}
+	mux.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "event: error") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "OPENAI_API_KEY") {
+		t.Fatalf("want key hint, body = %s", rec.Body.String())
+	}
+}
+
+func TestChat_openaiProviderUsesOpenAI(t *testing.T) {
+	ollamaHits := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ollamaHits++
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer ollama.Close()
+
+	openai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"из openai"}}]}`))
+	}))
+	defer openai.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := ai.NewAgent(ai.New(ollama.URL, "m"), notes)
+	agent.UseOpenAI(ai.NewOpenAI(openai.URL, "gpt-4o-mini", "sk-test"), "gpt-4o-mini")
+	mux := http.NewServeMux()
+	MountChat(mux, agent)
+
+	body := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}],"provider":"openai"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
+	rec := flushRecorder{httptest.NewRecorder()}
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if ollamaHits != 0 {
+		t.Fatalf("ollama hits = %d", ollamaHits)
+	}
+	if !strings.Contains(rec.Body.String(), "из openai") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
 }

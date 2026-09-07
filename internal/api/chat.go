@@ -25,6 +25,7 @@ func MountChat(mux *http.ServeMux, agent *ai.Agent) {
 			Messages    []ai.Message `json:"messages"`
 			Scope       string       `json:"scope"`
 			Attachments []string     `json:"attachments"`
+			Provider    string       `json:"provider"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -58,7 +59,7 @@ func MountChat(mux *http.ServeMux, agent *ai.Agent) {
 			return
 		}
 
-		result, err := agent.Chat(r.Context(), messages, func(p ai.Phase) {
+		result, err := agent.ChatUsing(r.Context(), req.Provider, messages, func(p ai.Phase) {
 			if err := stream.Send("status", p); err != nil {
 				log.Printf("chat: status stream: %v", err)
 			}
@@ -115,6 +116,14 @@ func chatErrorMessage(err error) string {
 	}
 	msg := err.Error()
 	switch {
+	case errors.Is(err, ai.ErrOpenAIUnavailable):
+		return "OpenAI не настроена: задай OPENAI_API_KEY"
+	case strings.Contains(msg, "unknown provider"):
+		return "неизвестная модель"
+	case strings.Contains(msg, "request openai"):
+		return "не удалось связаться с OpenAI"
+	case strings.Contains(msg, "openai status"):
+		return "OpenAI вернула ошибку"
 	case strings.Contains(msg, "request ollama"),
 		strings.Contains(msg, "connection refused"),
 		strings.Contains(msg, "no such host"):

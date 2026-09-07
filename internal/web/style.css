@@ -1671,9 +1671,63 @@ span.notes-chat__pill {
   flex-shrink: 0;
 }
 
-.notes-chat__scope-wrap {
+.notes-chat__scope-wrap,
+.notes-chat__model-wrap {
   position: relative;
   flex-shrink: 0;
+}
+
+.notes-chat__model {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  max-width: 120px;
+  margin: 0;
+  padding: 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: #333;
+  color: #ccc;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: -0.2px;
+  cursor: pointer;
+}
+
+.notes-chat__model:hover:not(:disabled) {
+  background: #444;
+}
+
+.notes-chat__model:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.notes-chat__model-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-chat__model-chevron {
+  width: 8px;
+  height: 8px;
+  opacity: 0.45;
+}
+
+.notes-chat__model-chevron img {
+  transform: rotate(90deg);
+}
+
+.notes-chat__model-menu {
+  min-width: 196px;
+}
+
+.notes-chat__option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .notes-chat__scope {

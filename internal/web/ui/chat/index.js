@@ -8,3 +8,4 @@ export { createBotError, createBotMessage, createBotPending, createSystemMessage
 export { createChatHeader } from "./header.js";
 export { createChatComposer } from "./composer.js";
 export { createChatScopePicker } from "./scope-picker.js";
+export { createChatModelPicker } from "./model-picker.js";

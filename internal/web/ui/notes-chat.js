@@ -5,6 +5,7 @@ import {
   createBotPending,
   createChatComposer,
   createChatHeader,
+  createChatModelPicker,
   createChatScopePicker,
   createSystemMessage,
   createUserMessage,
@@ -16,6 +17,7 @@ function isSystemMessage(msg) {
 
 const CHATS_KEY = "notes-chats-v1";
 const OPEN_KEY = "notes-chat-open";
+const PROVIDER_KEY = "notes-chat-provider";
 const MAX_CHATS = 20;
 
 function newId() {
@@ -122,7 +124,7 @@ async function readChatStream(res, onEvent) {
   throw new Error("stream ended without result");
 }
 
-async function chatStream(messages, scope, attachments, onEvent, signal) {
+async function chatStream(messages, scope, attachments, provider, onEvent, signal) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: {
@@ -135,6 +137,7 @@ async function chatStream(messages, scope, attachments, onEvent, signal) {
       messages,
       scope: scope || "",
       attachments: attachments || [],
+      provider: provider || "ollama",
     }),
   });
   return readChatStream(res, onEvent);
@@ -217,6 +220,8 @@ export function createNotesChat({
   let abort = null;
   let sendGate = Promise.resolve();
   let turnUndo = emptyUndo();
+  let providers = [{ id: "ollama", label: "Локальная", available: true }];
+  let provider = localStorage.getItem(PROVIDER_KEY) || "ollama";
 
   function activeChat() {
     return store.chats.find((c) => c.id === store.activeId) || store.chats[0];
@@ -231,6 +236,22 @@ export function createNotesChat({
     }).catch(() => {});
   }
 
+  async function loadProviders() {
+    try {
+      const res = await fetch("/api/models", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.providers) && data.providers.length) {
+        providers = data.providers;
+      }
+    } catch {
+    }
+    if (!providers.some((p) => p.id === provider && p.available)) {
+      provider = providers.find((p) => p.available)?.id || "ollama";
+    }
+    modelPicker.sync();
+  }
+
   async function hydrate() {
     let loaded = null;
     try {
@@ -238,6 +259,7 @@ export function createNotesChat({
       if (res.ok) loaded = normalizeStore(await res.json());
     } catch {
     }
+    await loadProviders();
     if (!loaded) {
       loaded = loadLocalStore();
       store.chats = loaded.chats;
@@ -297,13 +319,34 @@ export function createNotesChat({
     getTargets: getScopeTargets,
     getActiveId: () => activeChat()?.scope || "",
     onSelect: setChatScope,
-    onOpen: () => closeAttachMenu(),
+    onOpen: () => {
+      closeAttachMenu();
+      modelPicker.close();
+    },
+  });
+
+  function setProvider(id) {
+    if (!providers.some((p) => p.id === id && p.available)) return;
+    provider = id;
+    localStorage.setItem(PROVIDER_KEY, id);
+    modelPicker.sync();
+  }
+
+  const modelPicker = createChatModelPicker({
+    getProviders: () => providers,
+    getActiveId: () => provider,
+    onSelect: setProvider,
+    onOpen: () => {
+      closeAttachMenu();
+      scopePicker.close();
+    },
   });
 
   const composer = createChatComposer({
     listNotes: scopedNotes,
     noteLabel,
     scopePicker: scopePicker.el,
+    modelPicker,
     onClearScope: () => setChatScope(""),
     onSubmit: (text, attachments) => sendMessage(text, attachments),
     onStop: stopGenerating,
@@ -339,6 +382,7 @@ export function createNotesChat({
     header.closeMenu();
     composer.closeMenu();
     scopePicker.close();
+    modelPicker.close();
   }
 
   function attachNote(name) {
@@ -529,6 +573,7 @@ export function createNotesChat({
         history(),
         chat.scope || "",
         attached.map((a) => a.path).filter(Boolean),
+        provider,
         (phase) => {
           applyPhaseUndo(turnUndo, phase);
           onNoteEvent?.(phase);

@@ -30,13 +30,48 @@ var blockedTools = map[string]bool{
 
 // Agent runs the tool-calling loop against Ollama and storage.
 type Agent struct {
-	client *Client
-	notes  *storage.Notes
+	client      *Client
+	openai      ChatModel
+	openaiModel string
+	notes       *storage.Notes
 }
 
 // NewAgent creates an agent backed by client and notes storage.
 func NewAgent(client *Client, notes *storage.Notes) *Agent {
 	return &Agent{client: client, notes: notes}
+}
+
+// UseOpenAI attaches an optional OpenAI-compatible backend. Chat() still uses Ollama.
+func (a *Agent) UseOpenAI(c ChatModel, model string) {
+	a.openai = c
+	a.openaiModel = model
+}
+
+// Providers lists backends for the UI picker. Ollama is always first and available.
+func (a *Agent) Providers() []ModelProvider {
+	ollama := ModelProvider{ID: ProviderOllama, Label: "Локальная", Available: a.client != nil}
+	if a.client != nil {
+		ollama.Model = a.client.Model()
+	}
+	openai := ModelProvider{ID: ProviderOpenAI, Label: "OpenAI", Model: a.openaiModel, Available: a.openai != nil}
+	return []ModelProvider{ollama, openai}
+}
+
+func (a *Agent) chatModel(provider string) (ChatModel, error) {
+	id, err := ParseProvider(provider)
+	if err != nil {
+		return nil, err
+	}
+	if id == ProviderOpenAI {
+		if a.openai == nil {
+			return nil, ErrOpenAIUnavailable
+		}
+		return a.openai, nil
+	}
+	if a.client == nil {
+		return nil, errors.New("ollama client missing")
+	}
+	return a.client, nil
 }
 
 // ChatResult is the final response to the browser.
@@ -51,8 +86,21 @@ type ChatResult struct {
 	System       bool                `json:"system,omitempty"`
 }
 
-// Chat runs the event loop: model → tool calls → storage → model → final text.
+// Chat runs the event loop against the local Ollama client.
 func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress ProgressFunc, scope string, attachments ...string) (ChatResult, error) {
+	return a.ChatUsing(ctx, ProviderOllama, userMessages, progress, scope, attachments...)
+}
+
+// ChatUsing runs the same loop as Chat, but may use OpenAI when provider is "openai".
+func (a *Agent) ChatUsing(ctx context.Context, provider string, userMessages []Message, progress ProgressFunc, scope string, attachments ...string) (ChatResult, error) {
+	llm, err := a.chatModel(provider)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	return a.chatWith(ctx, llm, userMessages, progress, scope, attachments)
+}
+
+func (a *Agent) chatWith(ctx context.Context, llm ChatModel, userMessages []Message, progress ProgressFunc, scope string, attachments []string) (ChatResult, error) {
 	scope = strings.TrimSpace(scope)
 	if isVaultCountQuery(lastUserText(userMessages)) && len(attachments) == 0 {
 		return ChatResult{Content: a.vaultCount(scope), System: true}, nil
@@ -99,7 +147,7 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			return ChatResult{}, err
 		}
 		emitProgress(progress, Phase{Kind: "thinking"})
-		msg, err := a.client.ChatOnce(ctx, messages, tools)
+		msg, err := llm.ChatOnce(ctx, messages, tools)
 		if err != nil {
 			return ChatResult{}, err
 		}

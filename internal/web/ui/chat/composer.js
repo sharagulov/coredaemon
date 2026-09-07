@@ -13,12 +13,13 @@ function resizeTextarea(textarea) {
  *   listNotes: () => { name: string, title?: string }[],
  *   noteLabel: (name: string) => string,
  *   scopePicker?: Element,
+ *   modelPicker?: { el: Element, setDisabled?: (on: boolean) => void },
  *   onClearScope?: () => void,
  *   onSubmit: (text: string, attachments: { kind: string, path: string, label: string }[]) => void,
  *   onStop?: () => void,
  * }} opts
  */
-export function createChatComposer({ listNotes, noteLabel, scopePicker, onClearScope, onSubmit, onStop }) {
+export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPicker, onClearScope, onSubmit, onStop }) {
   const form = el("form", "notes-chat__composer", { "aria-label": "Сообщение помощнику" });
   const box = el("div", "notes-chat__input");
   const textarea = el("textarea", "notes-chat__textarea", {
@@ -57,6 +58,7 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, onClearS
   const chipsEl = el("div", "notes-chat__chips");
   left.append(attachWrap);
   if (scopePicker) left.append(scopePicker);
+  if (modelPicker?.el) left.append(modelPicker.el);
   left.append(chipsEl);
 
   const sendIcon = icon("assets/icon-chevron.png", "notes-chat__icon-slot notes-chat__icon-slot--send");
@@ -230,6 +232,7 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, onClearS
       sendBtn.setAttribute("aria-label", generating ? "Остановить" : "Отправить");
       sendBtn.classList.toggle("notes-chat__send--stop", generating);
       sendBtn.replaceChildren(generating ? stopIcon : sendIcon);
+      modelPicker?.setDisabled?.(generating);
     },
     closeMenu: dropdown.close,
     attach,
