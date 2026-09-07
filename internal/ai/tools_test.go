@@ -10,6 +10,35 @@ import (
 	"github.com/core-daemon/core-daemon/internal/storage"
 )
 
+func TestAgent_writeClaimWithoutToolIsRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Создал заметку Кошки.md"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "создай заметку про кошек"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != NoWriteMsg || !result.System || result.NotesChanged {
+		t.Fatalf("result = %+v", result)
+	}
+	list, err := notes.List()
+	if err != nil || len(list) != 0 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+}
+
 func TestNoteTools_excludesHoneypots(t *testing.T) {
 	names := map[string]bool{}
 	for _, tool := range NoteTools() {

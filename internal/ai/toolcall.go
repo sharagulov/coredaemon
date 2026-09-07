@@ -21,6 +21,9 @@ var (
 	// copies from earlier "Создано: …" reports. Nouns stay out of it, so an honest
 	// "удаление недоступно" reaches the user as the model wrote it.
 	doneMutation = regexp.MustCompile(`(?i)удалил|переместил|перен[её]с|(?:удал|перемещ|перенес)[ёе]н[аоы]?(?:$|[^\p{L}])`)
+	// doneWrite matches a finished write ("Создал заметку Кошки.md"). Nouns and infinitives stay
+	// out of it, so "создание заметок" and "что добавить" are not treated as reports.
+	doneWrite = regexp.MustCompile(`(?i)создал|записал|дописал|добавил|(?:создан|записан|дополнен)[аоы]?(?:$|[^\p{L}])`)
 	extraBlank   = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -229,6 +232,16 @@ func cleanReply(s string) string {
 // The note mention keeps retold note bodies ("перенёс вещи в гараж") out of the check.
 func claimsMutation(s string) bool {
 	if !doneMutation.MatchString(s) {
+		return false
+	}
+	low := strings.ToLower(s)
+	return strings.Contains(low, ".md") || strings.Contains(low, "заметк")
+}
+
+// claimsWrite reports whether the reply announces a note write. The note mention keeps retold
+// note bodies ("ты добавил соль в тесто") out of the check.
+func claimsWrite(s string) bool {
+	if !doneWrite.MatchString(s) {
 		return false
 	}
 	low := strings.ToLower(s)

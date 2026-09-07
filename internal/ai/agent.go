@@ -136,6 +136,9 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 			if claimsMutation(content) {
 				return finish(storage.BlockedMutationMsg, true), nil
 			}
+			if claimsWrite(content) {
+				return finish(NoWriteMsg, true), nil
+			}
 			if len(matches) > 0 && claimsNothingFound(content) {
 				return finish(searchFact(matches), true), nil
 			}

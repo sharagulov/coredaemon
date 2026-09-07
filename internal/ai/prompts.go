@@ -24,4 +24,7 @@ const (
 
 	// EmptySearchMsg replaces the model text when search_notes returned no hits.
 	EmptySearchMsg = "Ничего не найдено"
+
+	// NoWriteMsg replaces a reply that claims a write the tools never performed.
+	NoWriteMsg = "Ничего не записано на диск, повтори запрос"
 )
