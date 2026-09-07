@@ -23,13 +23,14 @@ var (
 	doneMutation = regexp.MustCompile(`(?i)удалил|переместил|перен[её]с|(?:удал|перемещ|перенес)[ёе]н[аоы]?(?:$|[^\p{L}])`)
 	// doneWrite matches a finished write ("Создал заметку Кошки.md"). Nouns and infinitives stay
 	// out of it, so "создание заметок" and "что добавить" are not treated as reports.
-	doneWrite = regexp.MustCompile(`(?i)создал|записал|дописал|добавил|(?:создан|записан|дополнен)[аоы]?(?:$|[^\p{L}])`)
-	extraBlank   = regexp.MustCompile(`\n{3,}`)
+	doneWrite  = regexp.MustCompile(`(?i)создал|записал|дописал|добавил|убрал|исправил|заменил|переписал|(?:создан|записан|дополнен|изменен|исправлен|заменен)[аоы]?(?:$|[^\p{L}])`)
+	extraBlank = regexp.MustCompile(`\n{3,}`)
 )
 
 var textToolNames = map[string]bool{
 	"create_note":    true,
 	"append_to_note": true,
+	"update_note":    true,
 	"read_note":      true,
 	"search_notes":   true,
 	"trash_note":     true,

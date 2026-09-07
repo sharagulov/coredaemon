@@ -367,3 +367,76 @@ func TestNotes_RevertChanges_createdWins(t *testing.T) {
 		t.Fatalf("created file should be trashed, not restored: %v", err)
 	}
 }
+
+func TestRunTool_updateRewritesExisting(t *testing.T) {
+	n := openTest(t)
+	old := "Чай — это напиток, получаемый путем заваривания листьев чайного растения в горячей воде. Чай широко распространен по всему миру и имеет множество видов, включая зеленый, черный, красный и белый чай. Я недавно в чай добавил мяту. Каждый вид чая имеет свои уникальные характеристики и вкус."
+	want := "Чай — это напиток, получаемый путем заваривания листьев чайного растения в горячей воде. Чай широко распространен по всему миру и имеет множество видов, включая зеленый, черный, красный и белый чай. Каждый вид чая имеет свои уникальные характеристики и вкус."
+	if _, err := n.Save("Чай.md", old); err != nil {
+		t.Fatal(err)
+	}
+
+	args, err := json.Marshal(map[string]string{"filename": "чай", "content": want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := n.RunTool("update_note", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "success" || res.File != "Чай.md" || res.NewFile || res.Previous != old {
+		t.Fatalf("res = %+v", res)
+	}
+
+	note, err := n.Get("Чай.md")
+	if err != nil || note.Content != want || strings.Contains(note.Content, "мяту") {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+	list, err := n.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %+v, err = %v", list, err)
+	}
+}
+
+func TestRunTool_updateUnknownIsError(t *testing.T) {
+	n := openTest(t)
+	res, err := n.RunTool("update_note", []byte(`{"filename":"Нет-такой.md","content":"текст"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "error" || res.File != "" {
+		t.Fatalf("res = %+v", res)
+	}
+	list, err := n.List()
+	if err != nil || len(list) != 0 {
+		t.Fatalf("created a note: %+v, err = %v", list, err)
+	}
+}
+
+func TestRunTool_updateRejectsEmptyAndTooLong(t *testing.T) {
+	n := openTest(t)
+	if _, err := n.Save("Чай.md", "мята"); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := n.RunTool("update_note", []byte(`{"filename":"Чай.md","content":"   "}`))
+	if err != nil || empty.Status != "error" {
+		t.Fatalf("empty = %+v, err = %v", empty, err)
+	}
+	note, err := n.Get("Чай.md")
+	if err != nil || note.Content != "мята" {
+		t.Fatalf("wiped = %+v, err = %v", note, err)
+	}
+
+	big := strings.Repeat("слово ", MaxRewriteRunes/2+1)
+	if _, err := n.Save("Большая.md", big); err != nil {
+		t.Fatal(err)
+	}
+	res, err := n.RunTool("update_note", []byte(`{"filename":"Большая.md","content":"коротко"}`))
+	if err != nil || res.Status != "error" {
+		t.Fatalf("long = %+v, err = %v", res, err)
+	}
+	got, err := n.Get("Большая.md")
+	if err != nil || got.Content != big {
+		t.Fatalf("long overwritten = %+v, err = %v", got, err)
+	}
+}

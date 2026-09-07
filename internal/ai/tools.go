@@ -61,6 +61,27 @@ func NoteTools() []Tool {
 		{
 			Type: "function",
 			Function: ToolFunction{
+				Name:        "update_note",
+				Description: "Replace the entire body of an existing .md note. Do not create a new file. Pass the full new body, not a fragment.",
+				Parameters: map[string]any{
+					"type":     "object",
+					"required": []string{"filename", "content"},
+					"properties": map[string]any{
+						"filename": map[string]any{
+							"type":        "string",
+							"description": "Existing note file name, e.g. Чай.md",
+						},
+						"content": map[string]any{
+							"type":        "string",
+							"description": "Full new note body in Russian.",
+						},
+					},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: ToolFunction{
 				Name:        "read_note",
 				Description: "Read the contents of an existing .md note file",
 				Parameters: map[string]any{

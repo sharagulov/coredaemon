@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,12 +41,84 @@ func TestAgent_writeClaimWithoutToolIsRejected(t *testing.T) {
 	}
 }
 
+func TestAgent_editClaimWithoutToolIsRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"Убрал мяту из заметки Чай.md"}}`))
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Чай.md", "чай с мятой"); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{
+		{Role: RoleUser, Content: "убери мяту из заметки про чай"},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != NoWriteMsg || !result.System || result.NotesChanged {
+		t.Fatalf("result = %+v", result)
+	}
+	note, err := notes.Get("Чай.md")
+	if err != nil || note.Content != "чай с мятой" {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+}
+
+func TestAgent_updateNoteRewritesTea(t *testing.T) {
+	old := "Чай — это напиток, получаемый путем заваривания листьев чайного растения в горячей воде. Чай широко распространен по всему миру и имеет множество видов, включая зеленый, черный, красный и белый чай. Я недавно в чай добавил мяту. Каждый вид чая имеет свои уникальные характеристики и вкус."
+	want := "Чай — это напиток, получаемый путем заваривания листьев чайного растения в горячей воде. Чай широко распространен по всему миру и имеет множество видов, включая зеленый, черный, красный и белый чай. Каждый вид чая имеет свои уникальные характеристики и вкус."
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		args, _ := json.Marshal(map[string]string{"filename": "Чай.md", "content": want})
+		fmt.Fprintf(w, `{"message":{"role":"assistant","content":"","tool_calls":[{"type":"function","function":{"name":"update_note","arguments":%s}}]}}`, args)
+	}))
+	defer srv.Close()
+
+	notes, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = notes.Close() })
+	if _, err := notes.Save("Чай.md", old); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := NewAgent(New(srv.URL, "m"), notes)
+	result, err := agent.Chat(context.Background(), []Message{{
+		Role:    RoleUser,
+		Content: "из этой заметки убери упоминание мяты",
+	}}, nil, "", "Чай.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "Дополнено: Чай.md" || !result.System || !result.NotesChanged {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(result.Updated) != 1 || result.Updated[0] != "Чай.md" || len(result.Created) != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	note, err := notes.Get("Чай.md")
+	if err != nil || note.Content != want || strings.Contains(note.Content, "мяту") {
+		t.Fatalf("note = %+v, err = %v", note, err)
+	}
+}
+
 func TestNoteTools_excludesHoneypots(t *testing.T) {
 	names := map[string]bool{}
 	for _, tool := range NoteTools() {
 		names[tool.Function.Name] = true
 	}
-	for _, name := range []string{"create_note", "append_to_note", "read_note", "search_notes"} {
+	for _, name := range []string{"create_note", "append_to_note", "update_note", "read_note", "search_notes"} {
 		if !names[name] {
 			t.Fatalf("missing tool %q", name)
 		}

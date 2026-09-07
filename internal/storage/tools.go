@@ -22,6 +22,12 @@ var (
 // BlockedMutationMsg is returned when the model tries to delete or move notes.
 const BlockedMutationMsg = "Удаление и перемещение недоступны"
 
+const (
+	// MaxRewriteRunes is the longest note body update_note may replace. Longer notes are
+	// clipped in the prompt, so a rewrite would silently drop the unseen tail.
+	MaxRewriteRunes = 6000
+)
+
 // ToolResult is returned to the model after a tool call.
 type ToolResult struct {
 	Status   string      `json:"status"`
@@ -67,6 +73,24 @@ func (n *Notes) AppendToNote(name, content string) (*Note, error) {
 	}
 	joined += content
 	return n.Save(name, joined)
+}
+
+func (n *Notes) UpdateNote(name, content string) (*Note, error) {
+	name = normalizeFilename(name)
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil, errors.New("empty content")
+	}
+	note, err := n.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	if len([]rune(note.Content)) > MaxRewriteRunes {
+		return nil, errors.New("note too large to rewrite")
+	}
+	return n.Save(name, content)
 }
 
 // RevertChanges undoes agent writes: restore previous bodies, then trash created files.
@@ -200,6 +224,38 @@ func (n *Notes) runTool(toolName string, args json.RawMessage, scope string) (To
 			}
 		}
 		return ToolResult{Status: "success", File: note.Name, Previous: previous, NewFile: isNew}, nil
+
+	case "update_note":
+		var p struct {
+			Filename string `json:"filename"`
+			Content  string `json:"content"`
+		}
+		if err := json.Unmarshal(args, &p); err != nil {
+			return ToolResult{Status: "error", Error: "invalid arguments"}, nil
+		}
+		if err := rejectForeignScript(p.Content); err != nil {
+			return ToolResult{Status: "error", Error: err.Error()}, nil
+		}
+		name := normalizeFilename(p.Filename)
+		if hit, ok := n.lookupNoteHit(p.Filename); ok {
+			name = hit.File
+		}
+		existing, err := n.Get(name)
+		if errors.Is(err, ErrNotFound) {
+			return ToolResult{Status: "error", Error: "note not found"}, nil
+		}
+		if err != nil {
+			return ToolResult{Status: "error", Error: err.Error()}, nil
+		}
+		if !NoteMatchesScope(existing.Section, existing.Important, scope) {
+			return ToolResult{Status: "error", Error: "note not in scope"}, nil
+		}
+		previous := existing.Content
+		note, err := n.UpdateNote(name, p.Content)
+		if err != nil {
+			return ToolResult{Status: "error", Error: err.Error()}, nil
+		}
+		return ToolResult{Status: "success", File: note.Name, Previous: previous}, nil
 
 	case "read_note":
 		var p struct {
@@ -461,6 +517,15 @@ func noteHit(note *Note) SearchHit {
 
 func (n *Notes) lookupNoteHit(query string) (SearchHit, bool) {
 	name := normalizeFilename(query)
+	list, err := n.List()
+	if err != nil {
+		return SearchHit{}, false
+	}
+	for _, note := range list {
+		if strings.EqualFold(note.Name, name) {
+			return SearchHit{File: note.Name, Title: note.Title, Snippet: note.Preview}, true
+		}
+	}
 	if note, err := n.Get(name); err == nil {
 		return noteHit(note), true
 	}
@@ -471,10 +536,6 @@ func (n *Notes) lookupNoteHit(query string) (SearchHit, bool) {
 	}
 	key := titleWordsKey(strings.TrimSuffix(stripNameWrap(query), ".md"))
 	if key == "" {
-		return SearchHit{}, false
-	}
-	list, err := n.List()
-	if err != nil {
 		return SearchHit{}, false
 	}
 	for _, note := range list {

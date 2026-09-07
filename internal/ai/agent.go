@@ -16,6 +16,7 @@ const maxToolTurns = 8
 var allowedTools = map[string]bool{
 	"create_note":    true,
 	"append_to_note": true,
+	"update_note":    true,
 	"read_note":      true,
 	"search_notes":   true,
 }
@@ -228,6 +229,16 @@ func (a *Agent) Chat(ctx context.Context, userMessages []Message, progress Progr
 						emitProgress(progress, Phase{Kind: "created", File: result.File, Title: result.Title})
 						break
 					}
+					if _, created := createdSet[result.File]; !created {
+						if _, seen := previous[result.File]; !seen {
+							previous[result.File] = result.Previous
+						}
+					}
+					updatedFiles = append(updatedFiles, result.File)
+					prev := result.Previous
+					emitProgress(progress, Phase{Kind: "updated", File: result.File, Title: result.Title, Previous: &prev})
+				case "update_note":
+					notesChanged = true
 					if _, created := createdSet[result.File]; !created {
 						if _, seen := previous[result.File]; !seen {
 							previous[result.File] = result.Previous

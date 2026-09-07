@@ -105,12 +105,12 @@ func TestCleanReply_dropsBulletsLeftByLinks(t *testing.T) {
 }
 
 func TestClaimsWrite(t *testing.T) {
-	for _, s := range []string{"Создал заметку Кошки.md", "Заметка создана", "Дописал в заметку факты"} {
+	for _, s := range []string{"Создал заметку Кошки.md", "Заметка создана", "Дописал в заметку факты", "Убрал мяту из заметки", "Исправил заметку Чай.md"} {
 		if !claimsWrite(s) {
 			t.Fatalf("missed claim: %q", s)
 		}
 	}
-	for _, s := range []string{"Создание заметок доступно в интерфейсе", "Что добавить в заметку?", "Ты добавил соль в тесто"} {
+	for _, s := range []string{"Создание заметок доступно в интерфейсе", "Что добавить в заметку?", "Ты добавил соль в тесто", "Что убрать из заметки?", "Ты убрал кастрюлю с плиты"} {
 		if claimsWrite(s) {
 			t.Fatalf("false claim: %q", s)
 		}
