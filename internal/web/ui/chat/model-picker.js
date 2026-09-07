@@ -19,7 +19,7 @@ export function createChatModelPicker({ getProviders, getActiveId, onSelect, onO
     "aria-expanded": "false",
   });
   const label = el("span", "notes-chat__model-label");
-  const chevron = icon("assets/icon-chevron.png", "notes-chat__icon-slot notes-chat__model-chevron");
+  const chevron = icon("assets/icon-chevron.png", "notes-chat__model-chevron");
   chevron.setAttribute("aria-hidden", "true");
   btn.append(label, chevron);
 

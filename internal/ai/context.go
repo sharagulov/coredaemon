@@ -26,7 +26,8 @@ func (a *Agent) loadAttachedNotes(scope string, names []string) (string, bool) {
 		return "", false
 	}
 	var b strings.Builder
-	b.WriteString("Текст прикреплённых заметок с диска:\n")
+	b.WriteString("Текст прикреплённых заметок с диска.\n")
+	b.WriteString("Это рабочий набор: новый материал писать в эти файлы через append_to_note или update_note. create_note — только если нужна отдельная новая заметка.\n")
 	loaded := false
 	for _, name := range names {
 		args, err := json.Marshal(map[string]string{"filename": name})

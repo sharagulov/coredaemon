@@ -97,6 +97,9 @@ func TestAgent_injectsAttachedNote(t *testing.T) {
 	if !strings.Contains(joined, "Постоянная пасмурность") {
 		t.Fatalf("injected messages missing note body: %s", bytes.TrimSpace(seen))
 	}
+	if !strings.Contains(joined, "append_to_note") || !strings.Contains(joined, "Serebrovskaya Oblast.md") {
+		t.Fatalf("attachment block must name the file and point writes at it: %s", bytes.TrimSpace(seen))
+	}
 	for _, m := range req.Messages {
 		if m.Role == RoleUser && strings.Contains(m.Content, "Контекст:") {
 			t.Fatalf("user message still contains text glue: %q", m.Content)

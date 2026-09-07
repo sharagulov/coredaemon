@@ -20,7 +20,7 @@ func NoteTools() []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "create_note",
-				Description: "Create one new .md note file on disk. Call once per note.",
+				Description: "Create one new .md file. Do not use this to add material to an attached or already named note — use append_to_note.",
 				Parameters: map[string]any{
 					"type":     "object",
 					"required": []string{"title", "content"},
@@ -41,7 +41,7 @@ func NoteTools() []Tool {
 			Type: "function",
 			Function: ToolFunction{
 				Name:        "append_to_note",
-				Description: "Append text to an existing .md note file",
+				Description: "Add material to the end of an existing .md note. Use when the user wants more facts, history, or details in a note that already exists.",
 				Parameters: map[string]any{
 					"type":     "object",
 					"required": []string{"filename", "content"},
