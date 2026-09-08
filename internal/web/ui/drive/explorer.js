@@ -5,7 +5,7 @@ import { bindSearchInput, createInlineForm } from "../input.js";
 import { registerPopupDismiss } from "../popups.js";
 import { createContextMenu, createContextAction } from "../context-menu.js";
 import { createDriveCrumbs } from "./crumbs.js";
-import { createDriveRow, driveFileUrl } from "./row.js";
+import { createDriveRow, driveFileUrl, driveParentPath } from "./row.js";
 import { createDrivePreview } from "./preview.js";
 
 const SORTS = [
@@ -35,6 +35,16 @@ export function createDriveExplorer({ crumbsHost }) {
 
   const toolbar = el("div", "drive-toolbar");
   const left = el("div", "drive-toolbar__left");
+  const backBtn = el("button", "notes-bar notes-bar--dropdown drive-back", {
+    type: "button",
+    "aria-label": "Назад",
+  });
+  backBtn.appendChild(icon("assets/icon-return.png", "notes-bar__icon-slot notes-bar__icon-slot--return"));
+  const backLabel = el("span");
+  backLabel.textContent = "Назад";
+  backBtn.appendChild(backLabel);
+  backBtn.disabled = true;
+
   const searchLabel = el("label", "notes-bar notes-bar--search");
   searchLabel.appendChild(icon("assets/icon-search.png", "notes-bar__icon-slot notes-bar__icon-slot--search"));
   const searchInput = el("input", "notes-bar__search-input", {
@@ -42,7 +52,7 @@ export function createDriveExplorer({ crumbsHost }) {
     placeholder: "Поиск",
     autocomplete: "off",
     spellcheck: "false",
-    "aria-label": "Поиск в папке",
+    "aria-label": "Поиск по папке и вложенным файлам",
   });
   searchLabel.appendChild(searchInput);
 
@@ -88,7 +98,7 @@ export function createDriveExplorer({ crumbsHost }) {
   }
   sortWrap.append(sortBtn, sortMenu);
 
-  left.append(searchLabel, addWrap);
+  left.append(backBtn, searchLabel, addWrap);
   toolbar.append(left, sortWrap);
 
   const grid = el("div", "drive-grid");
@@ -124,8 +134,7 @@ export function createDriveExplorer({ crumbsHost }) {
   }
 
   function visible() {
-    const q = query.trim().toLowerCase();
-    let list = entries.filter((e) => !q || e.name.toLowerCase().includes(q));
+    const list = [...entries];
     list.sort((a, b) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
       if (sortBy === "mtime") return (b.mtime || 0) - (a.mtime || 0);
@@ -143,9 +152,12 @@ export function createDriveExplorer({ crumbsHost }) {
       grid.appendChild(empty);
       return;
     }
+    const searching = !!query.trim();
     for (const entry of list) {
+      const hint = searching ? driveParentPath(entry.path) : "";
       grid.appendChild(createDriveRow(entry, {
         selected: entry.path === selected,
+        pathHint: hint && hint !== path ? hint : "",
         onOpen: openEntry,
         onContextMenu: openItemMenu,
       }));
@@ -205,6 +217,8 @@ export function createDriveExplorer({ crumbsHost }) {
     crumbs.render(path);
     const params = new URLSearchParams();
     if (path) params.set("path", path);
+    const q = query.trim();
+    if (q) params.set("q", q);
     try {
       const res = await fetch(`/api/drive/list?${params}`);
       if (!res.ok) {
@@ -264,12 +278,18 @@ export function createDriveExplorer({ crumbsHost }) {
     await load();
   }
 
+  function goUp() {
+    if (!path) return;
+    setPath(driveParentPath(path));
+  }
+
   function setPath(next) {
     path = next || "";
     selected = "";
     query = "";
     searchInput.value = "";
     preview.clear();
+    backBtn.disabled = !path;
     load();
   }
 
@@ -312,15 +332,17 @@ export function createDriveExplorer({ crumbsHost }) {
     },
   });
 
+  backBtn.addEventListener("click", goUp);
+
   bindSearchInput(searchInput, {
     debounceMs: 150,
     onSearch: (value) => {
       query = value;
-      renderGrid();
+      load();
     },
     onClear: () => {
       query = "";
-      renderGrid();
+      load();
     },
   });
 

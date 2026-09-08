@@ -17,7 +17,14 @@ const maxDrivePart = 4 << 30
 // MountDrive registers drive list/mkdir/upload/stream routes.
 func MountDrive(mux *http.ServeMux, drive *storage.Drive) {
 	mux.HandleFunc("GET /api/drive/list", func(w http.ResponseWriter, r *http.Request) {
-		entries, err := drive.List(r.URL.Query().Get("path"))
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		var entries []storage.DriveEntry
+		var err error
+		if q == "" {
+			entries, err = drive.List(r.URL.Query().Get("path"))
+		} else {
+			entries, err = drive.Search(r.URL.Query().Get("path"), q)
+		}
 		if err != nil {
 			writeDriveErr(w, err)
 			return

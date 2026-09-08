@@ -85,6 +85,28 @@ func TestDrive_saveFile(t *testing.T) {
 	}
 }
 
+func TestDrive_searchNested(t *testing.T) {
+	d := openDriveTest(t)
+	if _, err := d.SaveFile("photos/2024/cat.jpg", strings.NewReader("x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SaveFile("docs/a.txt", strings.NewReader("y")); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := d.Search("", "cat")
+	if err != nil || len(hits) != 1 || hits[0].Name != "cat.jpg" {
+		t.Fatalf("root search = %+v, err=%v", hits, err)
+	}
+	hits, err = d.Search("photos", "cat")
+	if err != nil || len(hits) != 1 || hits[0].Path != "photos/2024/cat.jpg" {
+		t.Fatalf("photos search = %+v, err=%v", hits, err)
+	}
+	hits, err = d.Search("docs", "cat")
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("docs search = %+v, err=%v", hits, err)
+	}
+}
+
 func TestDrive_removeFileAndFolder(t *testing.T) {
 	d := openDriveTest(t)
 	if _, err := d.SaveFile("docs/a.txt", strings.NewReader("hi")); err != nil {

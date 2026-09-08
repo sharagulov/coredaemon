@@ -16,8 +16,9 @@ import (
 
 const (
 	driveIndexName = ".index.db"
-	driveScanBatch = 200
-	driveScanMax   = 200_000
+	driveScanBatch   = 200
+	driveScanMax     = 200_000
+	driveSearchLimit = 200
 )
 
 // DriveEntry is one folder or file in the drive index.
@@ -107,6 +108,47 @@ func (d *Drive) List(rel string) ([]DriveEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list drive: %w", err)
 	}
+	return collectDriveEntries(rows)
+}
+
+func (d *Drive) Search(prefix, query string) ([]DriveEntry, error) {
+	prefix, err := normalizeDrivePath(prefix)
+	if err != nil {
+		return nil, err
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return d.List(prefix)
+	}
+	like := "%" + escapeLike(q) + "%"
+	var rows *sql.Rows
+	if prefix == "" {
+		rows, err = d.db.Query(`
+			SELECT path, name, is_dir, size, mime, kind, mtime_ns
+			FROM drive_index
+			WHERE name LIKE ? ESCAPE '\'
+			   OR path LIKE ? ESCAPE '\'
+			ORDER BY is_dir DESC, name COLLATE NOCASE
+			LIMIT ?
+		`, like, like, driveSearchLimit)
+	} else {
+		rows, err = d.db.Query(`
+			SELECT path, name, is_dir, size, mime, kind, mtime_ns
+			FROM drive_index
+			WHERE (name LIKE ? ESCAPE '\'
+			    OR path LIKE ? ESCAPE '\')
+			  AND (path = ? OR path GLOB ?)
+			ORDER BY is_dir DESC, name COLLATE NOCASE
+			LIMIT ?
+		`, like, like, prefix, prefix+"/*", driveSearchLimit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("search drive: %w", err)
+	}
+	return collectDriveEntries(rows)
+}
+
+func collectDriveEntries(rows *sql.Rows) ([]DriveEntry, error) {
 	defer rows.Close()
 	out := make([]DriveEntry, 0)
 	for rows.Next() {
@@ -119,6 +161,10 @@ func (d *Drive) List(rel string) ([]DriveEntry, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func (d *Drive) Mkdir(rel string) (*DriveEntry, error) {

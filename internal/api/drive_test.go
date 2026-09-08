@@ -56,6 +56,25 @@ func TestDriveAPI_mkdirList(t *testing.T) {
 	}
 }
 
+func TestDriveAPI_searchNested(t *testing.T) {
+	mux, _ := mountDrive(t)
+	rec := postDriveUpload(t, mux, "photos/2024", "cat.jpg", "xx")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	rec = serveJSON(t, mux, http.MethodGet, "/api/drive/list?q=cat", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var hits []storage.DriveEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Name != "cat.jpg" {
+		t.Fatalf("hits = %+v", hits)
+	}
+}
+
 func TestDriveAPI_rejectsTraversal(t *testing.T) {
 	mux, _ := mountDrive(t)
 	rec := serveJSON(t, mux, http.MethodGet, "/api/drive/list?path=../etc", "")
