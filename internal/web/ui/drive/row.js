@@ -17,11 +17,21 @@ export function driveFileUrl(path) {
  *   is_dir?: boolean,
  *   kind?: string,
  * }} entry
- * @param {{ selected?: boolean, pathHint?: string, onOpen: (entry: object) => void, onContextMenu?: (e: MouseEvent, entry: object) => void }} opts
+ * @param {{
+ *   selected?: boolean,
+ *   focused?: boolean,
+ *   pathHint?: string,
+ *   onSelect: (e: MouseEvent, entry: object) => void,
+ *   onActivate: (entry: object) => void,
+ *   onContextMenu?: (e: MouseEvent, entry: object) => void,
+ * }} opts
  */
-export function createDriveRow(entry, { selected = false, pathHint = "", onOpen, onContextMenu }) {
+export function createDriveRow(entry, { selected = false, focused = false, pathHint = "", onSelect, onActivate, onContextMenu }) {
   const btn = el("button", "drive-tile", { type: "button" });
+  btn.dataset.path = entry.path;
+  btn.tabIndex = focused ? 0 : -1;
   btn.classList.toggle("is-selected", selected);
+  btn.classList.toggle("is-focused", focused);
   const kind = entry.is_dir ? "folder" : entry.kind || "other";
   const src = kind === "folder" ? "assets/icon-folder.png" : "assets/icon-file.png";
   btn.appendChild(icon(src, "drive-tile__icon"));
@@ -35,7 +45,16 @@ export function createDriveRow(entry, { selected = false, pathHint = "", onOpen,
     sub.title = pathHint;
     btn.appendChild(sub);
   }
-  btn.addEventListener("click", () => onOpen(entry));
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (e.detail > 1) return;
+    onSelect(e, entry);
+  });
+  btn.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onActivate(entry);
+  });
   if (onContextMenu) {
     btn.addEventListener("contextmenu", (e) => {
       e.preventDefault();

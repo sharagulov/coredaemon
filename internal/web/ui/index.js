@@ -4,6 +4,7 @@ export { createDropdown } from "./dropdown.js";
 export { createAddMenuButton, createMenuButton, createIconButton } from "./button.js";
 export { bindSearchInput, createInlineForm } from "./input.js";
 export { createNoteCard } from "./note-card.js";
+export { createConfirmModal } from "./modal.js";
 export { createContextMenu, createSubmenuRow, createContextAction } from "./context-menu.js";
 export { registerPopupDismiss } from "./popups.js";
 export { renderMarkdown } from "./markdown.js";

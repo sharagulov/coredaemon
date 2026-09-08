@@ -4,6 +4,7 @@ import { createMenuOption } from "../menu-option.js";
 import { bindSearchInput, createInlineForm } from "../input.js";
 import { registerPopupDismiss } from "../popups.js";
 import { createContextMenu, createContextAction } from "../context-menu.js";
+import { createConfirmModal } from "../modal.js";
 import { createDriveCrumbs } from "./crumbs.js";
 import { createDriveRow, driveFileUrl, driveParentPath } from "./row.js";
 import { createDrivePreview } from "./preview.js";
@@ -26,13 +27,17 @@ export function createDriveExplorer({ crumbsHost }) {
   let entries = [];
   let query = "";
   let sortBy = "name";
-  let selected = "";
+  const selected = new Set();
+  let focused = "";
+  let anchor = "";
 
   const crumbs = createDriveCrumbs({ host: crumbsHost, onGo: setPath });
 
   const root = el("div", "drive-main");
   const explorer = el("section", "drive-explorer", { "aria-label": "Облако" });
   const preview = createDrivePreview();
+  const deleteModal = createConfirmModal();
+  document.body.appendChild(deleteModal.el);
 
   const toolbar = el("div", "drive-toolbar");
   const left = el("div", "drive-toolbar__left");
@@ -110,7 +115,7 @@ export function createDriveExplorer({ crumbsHost }) {
   left.append(backBtn, searchLabel, addWrap);
   toolbar.append(left, sortWrap);
 
-  const grid = el("div", "drive-grid");
+  const grid = el("div", "drive-grid", { tabindex: "0" });
   explorer.append(toolbar, grid, fileInput, folderInput);
   root.append(explorer, preview.el);
 
@@ -153,9 +158,75 @@ export function createDriveExplorer({ crumbsHost }) {
     return list;
   }
 
+  function rangePaths(list, from, to) {
+    const a = list.findIndex((item) => item.path === from);
+    const b = list.findIndex((item) => item.path === to);
+    if (a < 0 && b < 0) return [];
+    if (a < 0) return [to];
+    if (b < 0) return [from];
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    return list.slice(lo, hi + 1).map((item) => item.path);
+  }
+
+  function clearSelection() {
+    selected.clear();
+    focused = "";
+    anchor = "";
+    preview.clear();
+    syncSelection();
+  }
+
+  function pruneSelection(list) {
+    const paths = new Set(list.map((item) => item.path));
+    for (const rel of [...selected]) {
+      if (!paths.has(rel)) selected.delete(rel);
+    }
+    if (focused && !paths.has(focused)) focused = "";
+    if (anchor && !paths.has(anchor)) anchor = focused;
+    if (!focused && selected.size) focused = [...selected][0];
+  }
+
+  function tileByPath(rel) {
+    if (!rel) return null;
+    for (const node of grid.querySelectorAll(".drive-tile")) {
+      if (node.dataset.path === rel) return node;
+    }
+    return null;
+  }
+
+  function syncSelection() {
+    const tiles = [...grid.querySelectorAll(".drive-tile")];
+    for (const btn of tiles) {
+      const rel = btn.dataset.path;
+      const isFocused = rel === focused;
+      btn.classList.toggle("is-selected", selected.has(rel));
+      btn.classList.toggle("is-focused", isFocused);
+      btn.tabIndex = isFocused ? 0 : -1;
+    }
+    if (!focused && tiles[0]) tiles[0].tabIndex = 0;
+  }
+
+  function focusTile(rel) {
+    const btn = tileByPath(rel);
+    if (!btn) return;
+    btn.focus();
+    btn.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function gridColumns() {
+    const tile = 140;
+    const gap = 15;
+    return Math.max(1, Math.floor((grid.clientWidth + gap) / (tile + gap)));
+  }
+
   function renderGrid() {
+    const keepFocus = document.activeElement
+      && grid.contains(document.activeElement)
+      && document.activeElement.closest(".drive-tile, .drive-grid");
     grid.replaceChildren();
     const list = visible();
+    pruneSelection(list);
     if (!list.length) {
       const empty = el("div", "drive-grid__empty");
       empty.textContent = query.trim() ? "Ничего не найдено" : "Пусто";
@@ -166,52 +237,124 @@ export function createDriveExplorer({ crumbsHost }) {
     for (const entry of list) {
       const hint = searching ? driveParentPath(entry.path) : "";
       grid.appendChild(createDriveRow(entry, {
-        selected: entry.path === selected,
+        selected: selected.has(entry.path),
+        focused: entry.path === focused,
         pathHint: hint && hint !== path ? hint : "",
-        onOpen: openEntry,
+        onSelect: selectEntry,
+        onActivate: activateEntry,
         onContextMenu: openItemMenu,
       }));
     }
+    syncSelection();
+    if (keepFocus && focused) focusTile(focused);
   }
 
   function itemUrl(rel) {
     return "/api/drive/item/" + String(rel).split("/").map(encodeURIComponent).join("/");
   }
 
-  async function removeEntry(entry) {
-    const res = await fetch(itemUrl(entry.path), { method: "DELETE" });
-    if (!res.ok) {
-      showErr("Не удалось удалить");
-      return;
+  async function removeEntries(list) {
+    for (const entry of list) {
+      const res = await fetch(itemUrl(entry.path), { method: "DELETE" });
+      if (!res.ok) {
+        showErr("Не удалось удалить");
+        await load();
+        return;
+      }
+      selected.delete(entry.path);
+      if (focused === entry.path) focused = "";
+      if (anchor === entry.path) anchor = focused;
     }
-    if (selected === entry.path) {
-      selected = "";
-      preview.clear();
-    }
+    preview.clear();
     await load();
   }
 
+  function askDelete(list) {
+    if (!list.length) return;
+    const one = list.length === 1 ? list[0] : null;
+    const allDirs = list.every((item) => item.is_dir);
+    const allFiles = list.every((item) => !item.is_dir);
+    deleteModal.open({
+      title: one
+        ? (one.is_dir ? "Удалить папку?" : "Удалить файл?")
+        : allDirs
+          ? "Удалить папки?"
+          : allFiles
+            ? "Удалить файлы?"
+            : "Удалить элементы?",
+      message: one
+        ? (one.is_dir
+          ? `«${one.name}» и всё содержимое будут удалены безвозвратно.`
+          : `«${one.name}» будет удалён безвозвратно.`)
+        : "Выбранные файлы и папки будут удалены безвозвратно.",
+      confirmLabel: "Удалить",
+      onConfirm: () => removeEntries(list),
+    });
+  }
+
   function openItemMenu(e, entry) {
+    if (!selected.has(entry.path)) {
+      selected.clear();
+      selected.add(entry.path);
+      focused = entry.path;
+      anchor = entry.path;
+      syncSelection();
+    }
+    const targets = visible().filter((item) => selected.has(item.path));
     ctx.openAt(e, (menu) => {
       menu.appendChild(createContextAction({
         label: "Удалить",
         danger: true,
         onClick: () => {
           ctx.close();
-          removeEntry(entry);
+          askDelete(targets.length ? targets : [entry]);
         },
       }));
     });
   }
 
-  function openEntry(entry) {
-    selected = entry.path;
-    renderGrid();
+  function selectEntry(e, entry) {
+    const list = visible();
+    const rel = entry.path;
+    const ctrl = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+    if (shift && (anchor || focused)) {
+      const from = anchor || focused;
+      const range = rangePaths(list, from, rel);
+      if (ctrl) {
+        for (const p of range) selected.add(p);
+      } else {
+        selected.clear();
+        for (const p of range) selected.add(p);
+      }
+      focused = rel;
+    } else if (ctrl) {
+      if (selected.has(rel)) selected.delete(rel);
+      else selected.add(rel);
+      focused = rel;
+      anchor = rel;
+    } else {
+      selected.clear();
+      selected.add(rel);
+      focused = rel;
+      anchor = rel;
+    }
+    syncSelection();
+    focusTile(rel);
+  }
+
+  function activateEntry(entry) {
+    if (!entry) return;
+    selected.clear();
+    selected.add(entry.path);
+    focused = entry.path;
+    anchor = entry.path;
     if (entry.is_dir) {
       preview.clear();
       setPath(entry.path);
       return;
     }
+    syncSelection();
     if (entry.kind === "image" || entry.kind === "video") {
       preview.show(entry);
       return;
@@ -221,6 +364,59 @@ export function createDriveExplorer({ crumbsHost }) {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  function activateFocused() {
+    const list = visible();
+    const entry = list.find((item) => item.path === focused)
+      || (selected.size === 1 ? list.find((item) => selected.has(item.path)) : null);
+    if (entry) activateEntry(entry);
+  }
+
+  function moveFocus(delta, { extend = false, additive = false } = {}) {
+    const list = visible();
+    if (!list.length) return;
+    let i = list.findIndex((item) => item.path === focused);
+    if (i < 0) {
+      i = 0;
+    } else {
+      if (extend && !anchor) anchor = focused;
+      i = Math.max(0, Math.min(list.length - 1, i + delta));
+    }
+    const entry = list[i];
+    focused = entry.path;
+    if (extend) {
+      const from = anchor || focused;
+      selected.clear();
+      for (const p of rangePaths(list, from, focused)) selected.add(p);
+    } else if (!additive) {
+      selected.clear();
+      selected.add(focused);
+      anchor = focused;
+    }
+    syncSelection();
+    focusTile(focused);
+  }
+
+  function onGridKey(e) {
+    if (e.target.closest(".drive-toolbar, input, textarea")) return;
+    const cols = gridColumns();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      activateFocused();
+      return;
+    }
+    let delta = 0;
+    if (e.key === "ArrowLeft") delta = -1;
+    else if (e.key === "ArrowRight") delta = 1;
+    else if (e.key === "ArrowUp") delta = -cols;
+    else if (e.key === "ArrowDown") delta = cols;
+    else return;
+    e.preventDefault();
+    moveFocus(delta, {
+      extend: e.shiftKey,
+      additive: e.ctrlKey || e.metaKey,
+    });
   }
 
   async function load() {
@@ -302,7 +498,9 @@ export function createDriveExplorer({ crumbsHost }) {
 
   function setPath(next) {
     path = next || "";
-    selected = "";
+    selected.clear();
+    focused = "";
+    anchor = "";
     query = "";
     searchInput.value = "";
     preview.clear();
@@ -379,6 +577,11 @@ export function createDriveExplorer({ crumbsHost }) {
 
   fileInput.addEventListener("change", () => uploadItems(fromFileList(fileInput.files)));
   folderInput.addEventListener("change", () => uploadItems(fromFileList(folderInput.files)));
+  grid.addEventListener("click", (e) => {
+    if (e.target.closest(".drive-tile")) return;
+    clearSelection();
+  });
+  explorer.addEventListener("keydown", onGridKey);
   explorer.addEventListener("dragover", (e) => {
     e.preventDefault();
     explorer.classList.add("is-drop");
