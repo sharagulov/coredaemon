@@ -11,8 +11,8 @@ import { createDrivePreview } from "./preview.js";
 import { fromFileList, collectDriveDrop } from "./upload.js";
 
 const SORTS = [
-  { id: "name", label: "имени" },
-  { id: "mtime", label: "дате изменения" },
+  { id: "name", label: "по имени" },
+  { id: "mtime", label: "по дате изменения" },
 ];
 
 function joinDrive(dir, name) {
@@ -96,9 +96,9 @@ export function createDriveExplorer({ crumbsHost }) {
     "aria-expanded": "false",
   });
   const sortMuted = el("span", "notes-bar__sort-muted");
-  sortMuted.textContent = "Сортировать по ";
+  sortMuted.textContent = "Сортировать ";
   const sortLabel = el("span");
-  sortLabel.textContent = "имени";
+  sortLabel.textContent = "по имени";
   sortBtn.append(sortMuted, sortLabel, icon("assets/icon-chevron.png", "notes-bar__icon-slot notes-bar__icon-slot--chevron"));
   const sortMenu = el("div", "notes-sort__menu", { hidden: "", role: "listbox" });
   for (const opt of SORTS) {
@@ -215,9 +215,28 @@ export function createDriveExplorer({ crumbsHost }) {
   }
 
   function gridColumns() {
-    const tile = 140;
-    const gap = 15;
-    return Math.max(1, Math.floor((grid.clientWidth + gap) / (tile + gap)));
+    const tile = grid.querySelector(".drive-tile");
+    if (!tile) return 1;
+    const style = getComputedStyle(grid);
+    const gap = parseFloat(style.columnGap || style.gap) || 15;
+    const tileWidth = tile.getBoundingClientRect().width;
+    if (!tileWidth) return 1;
+    return Math.max(1, Math.floor((grid.clientWidth + gap) / (tileWidth + gap)));
+  }
+
+  function handleTileClick(e, entry) {
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    if (coarse) {
+      if (entry.is_dir) {
+        activateEntry(entry);
+        return;
+      }
+      if (selected.has(entry.path) && selected.size === 1 && focused === entry.path) {
+        activateEntry(entry);
+        return;
+      }
+    }
+    selectEntry(e, entry);
   }
 
   function renderGrid() {
@@ -240,7 +259,7 @@ export function createDriveExplorer({ crumbsHost }) {
         selected: selected.has(entry.path),
         focused: entry.path === focused,
         pathHint: hint && hint !== path ? hint : "",
-        onSelect: selectEntry,
+        onSelect: handleTileClick,
         onActivate: activateEntry,
         onContextMenu: openItemMenu,
       }));

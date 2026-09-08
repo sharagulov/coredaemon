@@ -1,6 +1,7 @@
 import { el } from "../dom.js";
 import { createChatChip } from "./chip.js";
 import { createChatIconButton } from "./icon-btn.js";
+import { parseSlashInput, resolveCommand } from "./commands.js";
 
 /**
  * @param {{
@@ -12,7 +13,15 @@ import { createChatIconButton } from "./icon-btn.js";
 export function createUserMessage({ content, attachments, onRewind }) {
   const card = el("div", "notes-chat__user");
   const text = el("p", "notes-chat__user-text");
-  text.textContent = content;
+  const parsed = parseSlashInput(content);
+  if (parsed && resolveCommand(parsed)) {
+    const cmd = el("code", "notes-chat__cmd");
+    cmd.textContent = `/${parsed.tokenRaw}`;
+    text.appendChild(cmd);
+    if (parsed.rest) text.appendChild(document.createTextNode(` ${parsed.rest}`));
+  } else {
+    text.textContent = content;
+  }
   card.appendChild(text);
 
   if (attachments?.length) {

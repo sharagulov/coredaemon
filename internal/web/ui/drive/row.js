@@ -45,8 +45,16 @@ export function createDriveRow(entry, { selected = false, focused = false, pathH
     sub.title = pathHint;
     btn.appendChild(sub);
   }
+
+  let longPress = false;
+  let pressTimer = null;
+
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
+    if (longPress) {
+      longPress = false;
+      return;
+    }
     if (e.detail > 1) return;
     onSelect(e, entry);
   });
@@ -56,6 +64,26 @@ export function createDriveRow(entry, { selected = false, focused = false, pathH
     onActivate(entry);
   });
   if (onContextMenu) {
+    const cancelPress = () => {
+      if (pressTimer != null) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    };
+    btn.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      longPress = false;
+      cancelPress();
+      const { clientX, clientY } = e;
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null;
+        longPress = true;
+        onContextMenu({ clientX, clientY, preventDefault() {} }, entry);
+      }, 500);
+    });
+    btn.addEventListener("pointerup", cancelPress);
+    btn.addEventListener("pointercancel", cancelPress);
+    btn.addEventListener("pointerleave", cancelPress);
     btn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();

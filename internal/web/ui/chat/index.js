@@ -7,5 +7,7 @@ export { createUserMessage } from "./user-message.js";
 export { createBotError, createBotMessage, createBotPending, createSystemMessage } from "./bot-message.js";
 export { createChatHeader } from "./header.js";
 export { createChatComposer } from "./composer.js";
+export { createCommandPalette } from "./command-palette.js";
+export { CHAT_COMMANDS, expandSlash, parseSlashInput } from "./commands.js";
 export { createChatScopePicker } from "./scope-picker.js";
 export { createChatModelPicker } from "./model-picker.js";

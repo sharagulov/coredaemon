@@ -78,41 +78,23 @@
       </div>
       <button
         type="button"
-        class="notes-bar notes-bar--short notes-header__chat-toggle"
+        class="notes-header__chat-toggle"
         aria-label="Свернуть чат"
         aria-pressed="true"
       >
-        <span class="notes-header__chat-icon" aria-hidden="true">
-          <img src="assets/icon-chevron.png" alt="">
-          <img src="assets/icon-chevron.png" alt="">
-        </span>
+        <img class="notes-header__chat-icon" src="assets/icon-chat.svg" alt="" aria-hidden="true">
       </button>
     </header>
 
     <div class="notes-body is-chat-open">
       <aside class="notes-section" aria-label="Список заметок">
         <div class="notes-controls">
-          <div class="notes-controls__left">
-            <label class="notes-bar notes-bar--search">
-              <span class="notes-bar__icon-slot notes-bar__icon-slot--search">
-                <img src="assets/icon-search.png" alt="">
-              </span>
-              <input
-                type="search"
-                class="notes-bar__search-input notes-toolbar__search"
-                placeholder="Поиск"
-                autocomplete="off"
-                spellcheck="false"
-                aria-label="Поиск заметок"
-              >
-            </label>
+          <div class="notes-controls__toolbar">
             <button type="button" class="notes-bar notes-bar--short notes-toolbar__add" aria-label="Новая заметка">
               <span class="notes-bar__icon-slot notes-bar__icon-slot--plus">
                 <img src="assets/icon-plus.png" alt="">
               </span>
             </button>
-          </div>
-          <div class="notes-controls__right">
             <button type="button" class="notes-bar notes-bar--dropdown notes-toolbar__trash">
               <span>Корзина</span>
             </button>
@@ -139,19 +121,32 @@
                 aria-haspopup="listbox"
                 aria-expanded="false"
               >
-                <span class="notes-bar__sort-muted">Сортировать по </span><span class="notes-toolbar__sort-label">дате изменения</span>
+                <span class="notes-bar__sort-muted">Сортировать </span><span class="notes-toolbar__sort-label">по дате изменения</span>
                 <span class="notes-bar__icon-slot notes-bar__icon-slot--chevron">
                   <img src="assets/icon-chevron.png" alt="">
                 </span>
               </button>
               <div class="notes-sort__menu" role="listbox" aria-label="Варианты сортировки" hidden>
-                <button type="button" class="notes-sort__option" role="option" data-sort="modified">дате изменения</button>
-                <button type="button" class="notes-sort__option" role="option" data-sort="created">дате создания</button>
-                <button type="button" class="notes-sort__option" role="option" data-sort="title">алфавиту от А до Я</button>
-                <button type="button" class="notes-sort__option" role="option" data-sort="title-desc">алфавиту от Я до А</button>
+                <button type="button" class="notes-sort__option" role="option" data-sort="modified">по дате изменения</button>
+                <button type="button" class="notes-sort__option" role="option" data-sort="created">по дате создания</button>
+                <button type="button" class="notes-sort__option" role="option" data-sort="title">по алфавиту от А до Я</button>
+                <button type="button" class="notes-sort__option" role="option" data-sort="title-desc">по алфавиту от Я до А</button>
               </div>
             </div>
           </div>
+          <label class="notes-bar notes-bar--search notes-controls__search">
+            <span class="notes-bar__icon-slot notes-bar__icon-slot--search">
+              <img src="assets/icon-search.png" alt="">
+            </span>
+            <input
+              type="search"
+              class="notes-bar__search-input notes-toolbar__search"
+              placeholder="Поиск"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Поиск заметок"
+            >
+          </label>
         </div>
         <div class="notes-section__scroll">
           <div class="notes-bento"></div>
@@ -175,6 +170,11 @@
           <div class="notes-editor__toolbar"></div>
           <div class="notes-editor__area">
             <div class="notes-editor__titlebar">
+              <button type="button" class="notes-editor__back" aria-label="К списку заметок">
+                <span class="notes-header__chevron" aria-hidden="true">
+                  <img src="assets/icon-chevron.png" alt="">
+                </span>
+              </button>
               <input
                 class="notes-editor__title"
                 type="text"

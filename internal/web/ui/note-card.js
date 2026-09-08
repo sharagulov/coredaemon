@@ -36,8 +36,37 @@ export function createNoteCard({ path, title, preview, date, isActive, onClick, 
   dateEl.textContent = date;
   btn.appendChild(dateEl);
 
-  btn.addEventListener("click", onClick);
+  let longPress = false;
+  let pressTimer = null;
+
+  btn.addEventListener("click", (e) => {
+    if (longPress) {
+      longPress = false;
+      return;
+    }
+    onClick();
+  });
   if (onContextMenu) {
+    const cancelPress = () => {
+      if (pressTimer != null) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    };
+    btn.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      longPress = false;
+      cancelPress();
+      const { clientX, clientY } = e;
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null;
+        longPress = true;
+        onContextMenu({ clientX, clientY, preventDefault() {} });
+      }, 500);
+    });
+    btn.addEventListener("pointerup", cancelPress);
+    btn.addEventListener("pointercancel", cancelPress);
+    btn.addEventListener("pointerleave", cancelPress);
     btn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       onContextMenu(e);

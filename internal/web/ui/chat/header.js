@@ -12,9 +12,10 @@ import { createChatOption } from "./chat-option.js";
  *   onSelect: (id: string) => void,
  *   onNew: () => void,
  *   onDelete: (id: string) => void,
+ *   onClose?: () => void,
  * }} opts
  */
-export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDelete }) {
+export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDelete, onClose }) {
   const header = el("header", "notes-chat__header");
   const wrap = el("div", "notes-chat__title-wrap");
 
@@ -63,6 +64,16 @@ export function createChatHeader({ getChats, getActiveId, onSelect, onNew, onDel
     iconSrc: "assets/icon-plus.png",
     onClick: onNew,
   });
+
+  if (onClose) {
+    const closeBtn = createChatIconButton({
+      extraClass: "notes-chat__close",
+      ariaLabel: "Закрыть чат",
+      iconSrc: "assets/icon-close.svg",
+      onClick: onClose,
+    });
+    header.append(closeBtn);
+  }
 
   header.append(wrap, newBtn);
 

@@ -55,6 +55,8 @@ const FILTER_STORAGE_KEY = "notes-filter";
     readerFoot: document.querySelector(".notes-reader__foot"),
     readerAction: document.querySelector(".notes-reader__action"),
     editorTitle: document.querySelector(".notes-editor__title"),
+    editorBackBtn: document.querySelector(".notes-editor__back"),
+    notesBody: document.querySelector(".notes-body"),
     ctxRoot: document.querySelector(".notes-ctx"),
     ctxMenu: document.querySelector(".notes-ctx__menu"),
   };
@@ -79,10 +81,10 @@ const FILTER_STORAGE_KEY = "notes-filter";
   }
 
   const SORT_OPTIONS = [
-    { id: "modified", label: "дате изменения" },
-    { id: "created", label: "дате создания" },
-    { id: "title", label: "алфавиту от А до Я" },
-    { id: "title-desc", label: "алфавиту от Я до А" },
+    { id: "modified", label: "по дате изменения" },
+    { id: "created", label: "по дате создания" },
+    { id: "title", label: "по алфавиту от А до Я" },
+    { id: "title-desc", label: "по алфавиту от Я до А" },
   ];
 
   const BUILTIN_FILTERS = [
@@ -575,6 +577,9 @@ const FILTER_STORAGE_KEY = "notes-filter";
       return;
     }
     setView("notes");
+    if (window.matchMedia("(max-width: 1100px)").matches) {
+      clearReader();
+    }
     Promise.all([loadSections(), loadNotes()]).catch(showError);
   }
 
@@ -764,6 +769,12 @@ const FILTER_STORAGE_KEY = "notes-filter";
     els.editorTitle.disabled = !!readOnly;
   }
 
+  function syncMobileLayout() {
+    if (!els.notesBody || !els.readerPanel) return;
+    const editorOpen = !els.readerPanel.hidden;
+    els.notesBody.classList.toggle("is-editor-open", editorOpen);
+  }
+
   function clearReader() {
     state.active = null;
     state.activeTrash = null;
@@ -776,6 +787,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
       noteEditor.setContent("");
       noteEditor.setReadOnly(false);
     }
+    syncMobileLayout();
   }
 
   function openNoteEditor(content, { readOnly = false, title = "" } = {}) {
@@ -787,6 +799,7 @@ const FILTER_STORAGE_KEY = "notes-filter";
     noteEditor.setReadOnly(readOnly);
     noteEditor.setContent(content || "");
     if (!readOnly) noteEditor.focus();
+    syncMobileLayout();
   }
 
   function openNoteReader(note) {
@@ -1112,6 +1125,12 @@ const FILTER_STORAGE_KEY = "notes-filter";
   if (els.notesCard) els.notesCard.addEventListener("click", goNotes);
   if (els.driveCard) els.driveCard.addEventListener("click", goDrive);
   if (els.homeBtn) els.homeBtn.addEventListener("click", goHome);
+  if (els.editorBackBtn) {
+    els.editorBackBtn.addEventListener("click", () => {
+      clearReader();
+      renderBento();
+    });
+  }
   if (els.driveHomeBtn) els.driveHomeBtn.addEventListener("click", goHome);
   window.addEventListener("popstate", () => {
     if (driveRoute()) applyScreen("drive");
@@ -1277,3 +1296,4 @@ const FILTER_STORAGE_KEY = "notes-filter";
 
   if (driveRoute()) applyScreen("drive");
   else if (notesRoute()) applyScreen("notes");
+  syncMobileLayout();

@@ -9,6 +9,7 @@ import {
   createChatScopePicker,
   createSystemMessage,
   createUserMessage,
+  expandSlash,
 } from "./chat/index.js";
 
 function isSystemMessage(msg) {
@@ -277,12 +278,15 @@ export function createNotesChat({
 
   const messagesEl = el("div", "notes-chat__messages");
 
+  let requestClose = () => {};
+
   const header = createChatHeader({
     getChats: () => store.chats,
     getActiveId: () => store.activeId,
     onSelect: switchChat,
     onNew: startNewChat,
     onDelete: (id) => { deleteChat(id).catch(() => {}); },
+    onClose: () => requestClose(),
   });
 
   function scopedNotes() {
@@ -360,11 +364,19 @@ export function createNotesChat({
     if (toggle) {
       toggle.classList.toggle("is-collapsed", !open);
       toggle.setAttribute("aria-pressed", open ? "true" : "false");
-      toggle.setAttribute("aria-label", open ? "Свернуть чат" : "Развернуть чат");
+      const compact = window.matchMedia("(max-width: 1100px)").matches;
+      toggle.setAttribute(
+        "aria-label",
+        open
+          ? (compact ? "Закрыть чат" : "Свернуть чат")
+          : (compact ? "Открыть чат" : "Развернуть чат"),
+      );
     }
     localStorage.setItem(OPEN_KEY, open ? "1" : "0");
     body.dispatchEvent(new CustomEvent("notes-chat-toggle"));
   }
+
+  requestClose = () => setOpen(false);
 
   function isOpen() {
     return body.classList.contains("is-chat-open");
@@ -399,7 +411,7 @@ export function createNotesChat({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({
         role: isSystemMessage(m) ? "system" : m.role,
-        content: m.content,
+        content: m.role === "user" ? expandSlash(m.content) : m.content,
       }));
   }
 
@@ -626,8 +638,17 @@ export function createNotesChat({
     toggle.addEventListener("click", () => setOpen(!isOpen()));
   }
 
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !isOpen()) return;
+    if (!window.matchMedia("(max-width: 1100px)").matches) return;
+    if (e.target.closest("textarea, input, [contenteditable='true']")) return;
+    setOpen(false);
+  });
+
   const savedOpen = localStorage.getItem(OPEN_KEY);
-  setOpen(savedOpen == null ? true : savedOpen !== "0");
+  const compact = window.matchMedia("(max-width: 1100px)").matches;
+  const defaultOpen = compact ? false : true;
+  setOpen(savedOpen == null ? defaultOpen : savedOpen !== "0");
   render();
   setBusy(true);
   hydrate().finally(() => {

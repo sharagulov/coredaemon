@@ -2,6 +2,8 @@ import { el, icon } from "../dom.js";
 import { createDropdown } from "../dropdown.js";
 import { createChatChip, fileLabel, folderLabel } from "./chip.js";
 import { renderAttachMenu } from "./attach-menu.js";
+import { createCommandPalette } from "./command-palette.js";
+import { parseSlashInput, resolveCommand } from "./commands.js";
 
 function resizeTextarea(textarea) {
   textarea.style.height = "auto";
@@ -21,11 +23,15 @@ function resizeTextarea(textarea) {
  */
 export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPicker, onClearScope, onSubmit, onStop }) {
   const form = el("form", "notes-chat__composer", { "aria-label": "Сообщение помощнику" });
+  const compose = el("div", "notes-chat__compose");
   const box = el("div", "notes-chat__input");
   const textarea = el("textarea", "notes-chat__textarea", {
     name: "message",
     rows: "1",
-    placeholder: "Начните общение с агентом",
+    placeholder: "Сообщение или /команда",
+    "aria-autocomplete": "list",
+    "aria-controls": "notes-chat-commands",
+    "aria-expanded": "false",
   });
 
   const bar = el("div", "notes-chat__input-bar");
@@ -68,7 +74,33 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPic
 
   bar.append(left, sendBtn);
   box.append(textarea, bar);
-  form.appendChild(box);
+
+  const palette = createCommandPalette({
+    getAnchor: () => textarea,
+    onPick: (cmd) => completeCommand(cmd),
+  });
+  compose.append(palette.el, box);
+  form.appendChild(compose);
+
+  function syncCommands() {
+    const open = palette.sync(textarea.value);
+    textarea.setAttribute("aria-expanded", open ? "true" : "false");
+    const active = palette.activeId();
+    if (active) textarea.setAttribute("aria-activedescendant", active);
+    else textarea.removeAttribute("aria-activedescendant");
+    if (open) dropdown?.close();
+  }
+
+  function completeCommand(cmd) {
+    if (!cmd) return;
+    const parsed = parseSlashInput(textarea.value);
+    const rest = parsed?.rest || "";
+    const name = cmd.names[0];
+    textarea.value = rest ? `/${name} ${rest}` : (cmd.needsArg ? `/${name} ` : `/${name}`);
+    resizeTextarea(textarea);
+    syncCommands();
+    textarea.focus();
+  }
 
   let attachments = [];
   let scopeLabel = "";
@@ -176,6 +208,9 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPic
       dropdown.close();
     },
     onOpen: () => {
+      palette.hide();
+      textarea.setAttribute("aria-expanded", "false");
+      textarea.removeAttribute("aria-activedescendant");
       attachExpanded.clear();
       attachSearch.value = "";
       renderAttachList();
@@ -208,14 +243,59 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPic
     if (!text) return;
     textarea.value = "";
     resizeTextarea(textarea);
+    palette.hide();
+    textarea.setAttribute("aria-expanded", "false");
+    textarea.removeAttribute("aria-activedescendant");
     const items = attachments.map((a) => ({ ...a }));
     attachments = [];
     renderChips();
     onSubmit(text, items);
   });
 
-  textarea.addEventListener("input", () => resizeTextarea(textarea));
+  textarea.addEventListener("input", () => {
+    resizeTextarea(textarea);
+    syncCommands();
+  });
   textarea.addEventListener("keydown", (e) => {
+    if (palette.isOpen()) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        palette.next();
+        const active = palette.activeId();
+        if (active) textarea.setAttribute("aria-activedescendant", active);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        palette.prev();
+        const active = palette.activeId();
+        if (active) textarea.setAttribute("aria-activedescendant", active);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        palette.hide();
+        textarea.setAttribute("aria-expanded", "false");
+        textarea.removeAttribute("aria-activedescendant");
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        completeCommand(palette.selected());
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const parsed = parseSlashInput(textarea.value);
+        const resolved = resolveCommand(parsed);
+        if (resolved && (!resolved.needsArg || parsed.rest.trim())) {
+          form.requestSubmit();
+          return;
+        }
+        completeCommand(palette.selected());
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       form.requestSubmit();
@@ -233,8 +313,18 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPic
       sendBtn.classList.toggle("notes-chat__send--stop", generating);
       sendBtn.replaceChildren(generating ? stopIcon : sendIcon);
       modelPicker?.setDisabled?.(generating);
+      if (generating) {
+        palette.hide();
+        textarea.setAttribute("aria-expanded", "false");
+        textarea.removeAttribute("aria-activedescendant");
+      }
     },
-    closeMenu: dropdown.close,
+    closeMenu() {
+      dropdown.close();
+      palette.hide();
+      textarea.setAttribute("aria-expanded", "false");
+      textarea.removeAttribute("aria-activedescendant");
+    },
     attach,
     setScopeChip(label) {
       scopeLabel = label || "";
@@ -245,6 +335,7 @@ export function createChatComposer({ listNotes, noteLabel, scopePicker, modelPic
       attachments = (items || []).map((a) => ({ ...a }));
       renderChips();
       resizeTextarea(textarea);
+      syncCommands();
     },
     focus() {
       textarea.focus();
