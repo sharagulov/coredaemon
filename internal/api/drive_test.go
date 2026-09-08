@@ -144,6 +144,132 @@ func TestDriveAPI_uploadAndStream(t *testing.T) {
 	}
 }
 
+func TestDriveAPI_uploadNestedFolder(t *testing.T) {
+	mux, _ := mountDrive(t)
+	rec := postDriveUpload(t, mux, "docs", "album/2024/cat.jpg", "xx")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("nested filename status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	rec = serveJSON(t, mux, http.MethodGet, "/api/drive/list?path=docs", "")
+	var top []storage.DriveEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &top); err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 1 || top[0].Path != "docs/album" || !top[0].IsDir {
+		t.Fatalf("docs list = %+v", top)
+	}
+	rec = serveJSON(t, mux, http.MethodGet, "/api/drive/list?path=docs/album/2024", "")
+	var nested []storage.DriveEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &nested); err != nil {
+		t.Fatal(err)
+	}
+	if len(nested) != 1 || nested[0].Path != "docs/album/2024/cat.jpg" {
+		t.Fatalf("nested list = %+v", nested)
+	}
+
+	rec = postDriveUploadRel(t, mux, "", "trip/note.txt", "hi")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rel status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	rec = serveJSON(t, mux, http.MethodGet, "/api/drive/list?path=trip", "")
+	var trip []storage.DriveEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &trip); err != nil {
+		t.Fatal(err)
+	}
+	if len(trip) != 1 || trip[0].Name != "note.txt" {
+		t.Fatalf("trip list = %+v", trip)
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	if err := w.WriteField("path", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteField("rel", "mix/ok.txt"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := w.CreateFormFile("file", "ok.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(part, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteField("rel", "mix/.DS_Store"); err != nil {
+		t.Fatal(err)
+	}
+	part, err = w.CreateFormFile("file", ".DS_Store")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(part, "skip"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/drive/upload", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("skip hidden status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	rec = serveJSON(t, mux, http.MethodGet, "/api/drive/list?path=mix", "")
+	var mix []storage.DriveEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &mix); err != nil {
+		t.Fatal(err)
+	}
+	if len(mix) != 1 || mix[0].Name != "ok.txt" {
+		t.Fatalf("mix list = %+v", mix)
+	}
+
+	var dirBuf bytes.Buffer
+	dw := multipart.NewWriter(&dirBuf)
+	if err := dw.WriteField("path", "docs"); err != nil {
+		t.Fatal(err)
+	}
+	if err := dw.WriteField("dir", "empty/inner"); err != nil {
+		t.Fatal(err)
+	}
+	if err := dw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/drive/upload", &dirBuf)
+	req.Header.Set("Content-Type", dw.FormDataContentType())
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty dir status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	rec = serveJSON(t, mux, http.MethodGet, "/api/drive/list?path=docs/empty", "")
+	var empty []storage.DriveEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &empty); err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 1 || empty[0].Path != "docs/empty/inner" || !empty[0].IsDir {
+		t.Fatalf("empty list = %+v", empty)
+	}
+}
+
+func TestSkipDriveUploadName(t *testing.T) {
+	if skipDriveUploadName(".hidden") {
+		t.Fatal("top-level hidden must not skip, so upload still 400")
+	}
+	if skipDriveUploadName("../x") {
+		t.Fatal("traversal must not skip")
+	}
+	if !skipDriveUploadName("album/.DS_Store") {
+		t.Fatal("nested hidden should skip")
+	}
+	if !skipDriveUploadName("x.part") {
+		t.Fatal(".part should skip")
+	}
+	if skipDriveUploadName("album/cat.jpg") {
+		t.Fatal("normal nested file")
+	}
+}
+
 func TestDriveAPI_uploadRejectsBadName(t *testing.T) {
 	mux, _ := mountDrive(t)
 	rec := postDriveUpload(t, mux, "../x", "a.txt", "no")
@@ -197,6 +323,33 @@ func TestCapReader(t *testing.T) {
 	if err != nil || string(b) != "hello" {
 		t.Fatalf("exact = %q err = %v", b, err)
 	}
+}
+
+func postDriveUploadRel(t *testing.T, mux http.Handler, dest, rel, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	if err := w.WriteField("path", dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteField("rel", rel); err != nil {
+		t.Fatal(err)
+	}
+	part, err := w.CreateFormFile("file", "ignored.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(part, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/drive/upload", &buf)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
 }
 
 func postDriveUpload(t *testing.T, mux http.Handler, dest, filename, body string) *httptest.ResponseRecorder {

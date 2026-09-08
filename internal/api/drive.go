@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -112,6 +113,7 @@ func receiveDriveUpload(r *http.Request, drive *storage.Drive) ([]storage.DriveE
 		return nil, err
 	}
 	destDir := ""
+	pendingRel := ""
 	out := make([]storage.DriveEntry, 0)
 	for {
 		part, err := mr.NextPart()
@@ -121,37 +123,112 @@ func receiveDriveUpload(r *http.Request, drive *storage.Drive) ([]storage.DriveE
 		if err != nil {
 			return nil, err
 		}
-		name := part.FormName()
-		if name == "path" {
+		switch part.FormName() {
+		case "path":
 			b, err := io.ReadAll(io.LimitReader(part, 2048))
 			_ = part.Close()
 			if err != nil {
 				return nil, err
 			}
 			destDir = strings.TrimSpace(string(b))
-			continue
-		}
-		if name != "file" {
+		case "rel":
+			b, err := io.ReadAll(io.LimitReader(part, 2048))
 			_ = part.Close()
-			continue
-		}
-		base := path.Base(strings.ReplaceAll(part.FileName(), "\\", "/"))
-		if base == "." || base == ".." || base == "" || strings.HasPrefix(base, ".") {
+			if err != nil {
+				return nil, err
+			}
+			pendingRel = strings.TrimSpace(string(b))
+		case "dir":
+			b, err := io.ReadAll(io.LimitReader(part, 2048))
 			_ = part.Close()
-			return nil, storage.ErrInvalidName
+			if err != nil {
+				return nil, err
+			}
+			raw := strings.TrimSpace(string(b))
+			if skipDriveUploadName(raw) {
+				continue
+			}
+			if _, err := drive.Mkdir(driveUploadDest(destDir, raw)); err != nil {
+				return nil, err
+			}
+		case "file":
+			raw := pendingRel
+			pendingRel = ""
+			if raw == "" {
+				raw = partUploadName(part)
+			}
+			if skipDriveUploadName(raw) {
+				drainPart(part)
+				continue
+			}
+			rel := driveUploadDest(destDir, raw)
+			entry, err := drive.SaveFile(rel, &capReader{r: part, max: maxDrivePart})
+			_ = part.Close()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, *entry)
+		default:
+			_ = part.Close()
 		}
-		rel := base
-		if destDir != "" {
-			rel = strings.Trim(destDir, "/") + "/" + base
-		}
-		entry, err := drive.SaveFile(rel, &capReader{r: part, max: maxDrivePart})
-		_ = part.Close()
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *entry)
 	}
 	return out, nil
+}
+
+func partUploadName(part *multipart.Part) string {
+	disp := part.Header.Get("Content-Disposition")
+	if i := strings.Index(disp, ";"); i >= 0 {
+		_, params, err := mime.ParseMediaType("x/x" + disp[i:])
+		if err == nil {
+			if name := params["filename"]; name != "" {
+				return name
+			}
+		}
+	}
+	return part.FileName()
+}
+
+func driveUploadDest(destDir, name string) string {
+	name = strings.Trim(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "/")
+	destDir = strings.Trim(strings.ReplaceAll(strings.TrimSpace(destDir), "\\", "/"), "/")
+	if destDir == "" {
+		return name
+	}
+	if name == "" {
+		return destDir
+	}
+	return destDir + "/" + name
+}
+
+func skipDriveUploadName(name string) bool {
+	name = strings.Trim(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "/")
+	if name == "" {
+		return false
+	}
+	parts := strings.Split(name, "/")
+	for _, p := range parts {
+		if p == ".." {
+			return false
+		}
+	}
+	nested := len(parts) > 1
+	for _, p := range parts {
+		if p == "." || p == "" {
+			return nested
+		}
+		if strings.HasSuffix(p, ".part") {
+			return true
+		}
+		if strings.HasPrefix(p, ".") {
+			return nested
+		}
+	}
+	return false
+}
+
+func drainPart(part *multipart.Part) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(part, maxDrivePart))
+	_ = part.Close()
 }
 
 func writeDriveErr(w http.ResponseWriter, err error) {

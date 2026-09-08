@@ -385,7 +385,7 @@ body[data-screen="drive"] {
 .drive-add__menu {
   left: 0;
   right: auto;
-  min-width: 180px;
+  min-width: 200px;
 }
 
 .drive-file-input {

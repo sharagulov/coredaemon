@@ -7,6 +7,7 @@ import { createContextMenu, createContextAction } from "../context-menu.js";
 import { createDriveCrumbs } from "./crumbs.js";
 import { createDriveRow, driveFileUrl, driveParentPath } from "./row.js";
 import { createDrivePreview } from "./preview.js";
+import { fromFileList, collectDriveDrop } from "./upload.js";
 
 const SORTS = [
   { id: "name", label: "имени" },
@@ -73,6 +74,14 @@ export function createDriveExplorer({ crumbsHost }) {
     tabindex: "-1",
     "aria-hidden": "true",
   });
+  const folderInput = el("input", "drive-file-input", {
+    type: "file",
+    multiple: "",
+    tabindex: "-1",
+    "aria-hidden": "true",
+  });
+  folderInput.setAttribute("webkitdirectory", "");
+  folderInput.setAttribute("directory", "");
 
   const sortWrap = el("div", "notes-sort drive-sort");
   const sortBtn = el("button", "notes-bar notes-bar--dropdown", {
@@ -102,7 +111,7 @@ export function createDriveExplorer({ crumbsHost }) {
   toolbar.append(left, sortWrap);
 
   const grid = el("div", "drive-grid");
-  explorer.append(toolbar, grid, fileInput);
+  explorer.append(toolbar, grid, fileInput, folderInput);
   root.append(explorer, preview.el);
 
   function paintAddMenu() {
@@ -110,6 +119,7 @@ export function createDriveExplorer({ crumbsHost }) {
     addMenu.append(
       createMenuOption({ className: "notes-sort__option", id: "folder", label: "Папка", dataKey: "action" }),
       createMenuOption({ className: "notes-sort__option", id: "upload", label: "Загрузить", dataKey: "action" }),
+      createMenuOption({ className: "notes-sort__option", id: "upload-folder", label: "Загрузить папку", dataKey: "action" }),
     );
   }
 
@@ -264,15 +274,22 @@ export function createDriveExplorer({ crumbsHost }) {
     await load();
   }
 
-  async function upload(files) {
-    if (!files.length) return;
+  async function uploadItems(files, dirs = []) {
+    const kept = (files || []).filter((item) => item?.file && item.rel);
+    const keptDirs = (dirs || []).filter(Boolean);
+    if (!kept.length && !keptDirs.length) return;
     const fd = new FormData();
     fd.append("path", path);
-    for (const file of files) fd.append("file", file);
+    for (const dir of keptDirs) fd.append("dir", dir);
+    for (const item of kept) {
+      fd.append("rel", item.rel);
+      fd.append("file", item.file);
+    }
     const res = await fetch("/api/drive/upload", { method: "POST", body: fd });
     fileInput.value = "";
+    folderInput.value = "";
     if (!res.ok) {
-      showErr("Не удалось загрузить файл");
+      showErr("Не удалось загрузить");
       return;
     }
     await load();
@@ -308,6 +325,10 @@ export function createDriveExplorer({ crumbsHost }) {
       }
       if (value === "upload") {
         fileInput.click();
+        add.close();
+      }
+      if (value === "upload-folder") {
+        folderInput.click();
         add.close();
       }
     },
@@ -356,7 +377,8 @@ export function createDriveExplorer({ crumbsHost }) {
     if (!e.target.closest(".drive-tile") && !e.target.closest(".drive-ctx")) ctx.close();
   });
 
-  fileInput.addEventListener("change", () => upload([...fileInput.files]));
+  fileInput.addEventListener("change", () => uploadItems(fromFileList(fileInput.files)));
+  folderInput.addEventListener("change", () => uploadItems(fromFileList(folderInput.files)));
   explorer.addEventListener("dragover", (e) => {
     e.preventDefault();
     explorer.classList.add("is-drop");
@@ -367,8 +389,7 @@ export function createDriveExplorer({ crumbsHost }) {
   explorer.addEventListener("drop", (e) => {
     e.preventDefault();
     explorer.classList.remove("is-drop");
-    const files = [...(e.dataTransfer?.files || [])];
-    if (files.length) upload(files);
+    collectDriveDrop(e.dataTransfer).then(({ files, dirs }) => uploadItems(files, dirs));
   });
   registerPopupDismiss([
     { rootSelector: ".drive-add", close: add.close },
